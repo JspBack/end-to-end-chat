@@ -27,6 +27,12 @@ type TableStore struct {
 	table string
 }
 
+const (
+	PeerStatusPending  = "pending"
+	PeerStatusAccepted = "accepted"
+	PeerStatusRejected = "rejected"
+)
+
 type KnownPeer struct {
 	PeerIP string
 	PubKey string

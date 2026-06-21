@@ -2,11 +2,13 @@ package store_test
 
 import (
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/JspBack/end-to-end-chat/client"
+	"github.com/JspBack/end-to-end-chat/config"
 	"github.com/JspBack/end-to-end-chat/store"
 )
 
@@ -19,8 +21,10 @@ func newTestClient(t *testing.T) *client.Client {
 	f.Close()
 	os.Remove(f.Name())
 
-	keyFile := filepath.Join(t.TempDir(), "key")
-	c := client.New("test", f.Name(), keyFile)
+	c := client.New(config.Config{
+		ClientName: "test",
+		KeyFile:    filepath.Join(t.TempDir(), "key"),
+	}, slog.Default())
 	t.Cleanup(func() { os.Remove(f.Name()) })
 	return c
 }

@@ -28,6 +28,18 @@ func (k *KnownPeerStore) Get(peerIP string) (*KnownPeer, error) {
 	return &peer, nil
 }
 
+func (k *KnownPeerStore) GetByPubKey(pubKey string) (*KnownPeer, error) {
+	var peer KnownPeer
+	q := "SELECT peer_ip, pub_key, status FROM known_peers WHERE pub_key = ?"
+	if err := k.db.QueryRowContext(context.Background(), q, pubKey).Scan(&peer.PeerIP, &peer.PubKey, &peer.Status); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, os.ErrNotExist
+		}
+		return nil, fmt.Errorf("store: get known peer by pub_key: %w", err)
+	}
+	return &peer, nil
+}
+
 func (k *KnownPeerStore) Remove(peerIP string) error {
 	q := "DELETE FROM known_peers WHERE peer_ip = ?"
 	if _, err := k.db.ExecContext(context.Background(), q, peerIP); err != nil {

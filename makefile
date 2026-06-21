@@ -3,10 +3,10 @@
 all: clean test build run
 
 build:
-	go build -ldflags="-s -w" -o bin/server ./cmd/
+	go build -ldflags="-s -w" -o bin/client ./cmd/
 
 run:
-	./bin/server
+	./bin/client
 
 test:
 	go test ./test

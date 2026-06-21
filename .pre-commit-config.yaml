@@ -32,7 +32,11 @@ repos:
     rev: v0.5.1
     hooks:
       - id: go-fmt
-      # - id: go-vet
+      - id: go-vet
+        entry: go vet
+        args: ["./..."]
+        language: system
+        pass_filenames: false
       - id: go-imports
       - id: golangci-lint
         args: ["--fix", "--config=.golangci.yaml"]

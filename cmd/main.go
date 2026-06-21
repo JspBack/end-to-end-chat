@@ -9,9 +9,6 @@ import (
 )
 
 func main() {
-	cfg := config.Parse()
-	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
-
-	client.New(cfg.ClientName, cfg.DB, cfg.KeyFile)
-	logger.Info("starting client", "client", cfg.ClientName, "peer", cfg.Peer, "store", cfg.DB)
+	cl := client.New(*config.Parse(), slog.New(slog.NewTextHandler(os.Stderr, nil)))
+	cl.Listen()
 }
