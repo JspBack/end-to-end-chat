@@ -27,7 +27,7 @@ func (c *Client) Put(msg *Message) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("client: marshal: %w", err)
 	}
-	id, err := c.Store.Put(string(plain), c.Keys.Private)
+	id, err := c.Store.Chats.Put(string(plain), c.Keys.Private)
 	if err != nil {
 		return "", fmt.Errorf("client: store put: %w", err)
 	}
@@ -35,7 +35,7 @@ func (c *Client) Put(msg *Message) (string, error) {
 }
 
 func (c *Client) Get(id string) (*Message, error) {
-	plain, err := c.Store.Get(id, c.Keys.Private)
+	plain, err := c.Store.Chats.Get(id, c.Keys.Private)
 	if err != nil {
 		return nil, fmt.Errorf("client: store get: %w", err)
 	}
@@ -51,15 +51,37 @@ func (c *Client) Update(id string, msg *Message) error {
 	if err != nil {
 		return fmt.Errorf("client: marshal: %w", err)
 	}
-	if err = c.Store.Update(id, string(plain), c.Keys.Private); err != nil {
+	if err = c.Store.Chats.Update(id, string(plain), c.Keys.Private); err != nil {
 		return fmt.Errorf("client: store update: %w", err)
 	}
 	return nil
 }
 
 func (c *Client) Delete(id string) error {
-	if err := c.Store.Delete(id); err != nil {
+	if err := c.Store.Chats.Delete(id); err != nil {
 		return fmt.Errorf("client: store delete: %w", err)
+	}
+	return nil
+}
+
+func (c *Client) AddKnownPeer(peer *store.KnownPeer) error {
+	if err := c.Store.KnownPeers.Add(peer); err != nil {
+		return fmt.Errorf("client: add known peer: %w", err)
+	}
+	return nil
+}
+
+func (c *Client) GetKnownPeer(peerIP string) (*store.KnownPeer, error) {
+	peer, err := c.Store.KnownPeers.Get(peerIP)
+	if err != nil {
+		return nil, fmt.Errorf("client: get known peer: %w", err)
+	}
+	return peer, nil
+}
+
+func (c *Client) RemoveKnownPeer(peerIP string) error {
+	if err := c.Store.KnownPeers.Remove(peerIP); err != nil {
+		return fmt.Errorf("client: remove known peer: %w", err)
 	}
 	return nil
 }

@@ -13,12 +13,27 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/google/uuid"
 	// sqLite driver.
 	_ "github.com/mattn/go-sqlite3"
 )
 
 type Store struct {
+	Chats      *TableStore
+	KnownPeers *KnownPeerStore
+}
+
+type TableStore struct {
+	db    *sql.DB
+	table string
+}
+
+type KnownPeer struct {
+	PeerIP string
+	PubKey string
+	Status string
+}
+
+type KnownPeerStore struct {
 	db *sql.DB
 }
 
@@ -30,10 +45,18 @@ func New(dbName string) *Store {
 	if err != nil {
 		panic(fmt.Errorf("store: open database: %w", err))
 	}
-	if _, err = db.ExecContext(context.Background(), "CREATE TABLE IF NOT EXISTS chats (id TEXT PRIMARY KEY, value TEXT)"); err != nil {
-		panic(fmt.Errorf("store: create table: %w", err))
+	for _, q := range []string{
+		"CREATE TABLE IF NOT EXISTS chats (id TEXT PRIMARY KEY, value TEXT)",
+		"CREATE TABLE IF NOT EXISTS known_peers (peer_ip TEXT PRIMARY KEY, pub_key TEXT, status TEXT)",
+	} {
+		if _, err = db.ExecContext(context.Background(), q); err != nil {
+			panic(fmt.Errorf("store: create table: %w", err))
+		}
 	}
-	return &Store{db: db}
+	return &Store{
+		Chats:      &TableStore{db: db, table: "chats"},
+		KnownPeers: &KnownPeerStore{db: db},
+	}
 }
 
 func aesKey(secret string) []byte {
@@ -79,56 +102,4 @@ func decrypt(secret, data string) ([]byte, error) {
 		return nil, fmt.Errorf("store: open: %w", err)
 	}
 	return plain, nil
-}
-
-func (s *Store) Put(value, secret string) (string, error) {
-	id := uuid.New().String()
-	encrypted, err := encrypt(secret, []byte(value))
-	if err != nil {
-		return "", fmt.Errorf("store: put encrypt: %w", err)
-	}
-	if _, err = s.db.ExecContext(context.Background(), "INSERT OR REPLACE INTO chats (id, value) VALUES (?, ?)", id, encrypted); err != nil {
-		return "", fmt.Errorf("store: put: %w", err)
-	}
-	return id, nil
-}
-
-func (s *Store) Get(id, secret string) (string, error) {
-	var encrypted string
-	if err := s.db.QueryRowContext(context.Background(), "SELECT value FROM chats WHERE id = ?", id).Scan(&encrypted); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return "", os.ErrNotExist
-		}
-		return "", fmt.Errorf("store: get: %w", err)
-	}
-	plain, err := decrypt(secret, encrypted)
-	if err != nil {
-		return "", fmt.Errorf("store: get decrypt: %w", err)
-	}
-	return string(plain), nil
-}
-
-func (s *Store) Update(id, value, secret string) error {
-	var exists bool
-	if err := s.db.QueryRowContext(context.Background(), "SELECT EXISTS(SELECT 1 FROM chats WHERE id = ?)", id).Scan(&exists); err != nil {
-		return fmt.Errorf("store: update check: %w", err)
-	}
-	if !exists {
-		return os.ErrNotExist
-	}
-	encrypted, err := encrypt(secret, []byte(value))
-	if err != nil {
-		return fmt.Errorf("store: update encrypt: %w", err)
-	}
-	if _, err = s.db.ExecContext(context.Background(), "INSERT OR REPLACE INTO chats (id, value) VALUES (?, ?)", id, encrypted); err != nil {
-		return fmt.Errorf("store: update: %w", err)
-	}
-	return nil
-}
-
-func (s *Store) Delete(id string) error {
-	if _, err := s.db.ExecContext(context.Background(), "DELETE FROM chats WHERE id = ?", id); err != nil {
-		return fmt.Errorf("store: delete: %w", err)
-	}
-	return nil
 }

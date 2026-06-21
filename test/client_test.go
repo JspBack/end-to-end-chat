@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/JspBack/end-to-end-chat/client"
+	"github.com/JspBack/end-to-end-chat/store"
 )
 
 func newTestClient(t *testing.T) *client.Client {
@@ -113,11 +114,10 @@ func TestClientEncryptionRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	raw, err := c.Store.Get(id, c.Keys.Private)
+	raw, err := c.Store.Chats.Get(id, c.Keys.Private)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// raw should be plaintext JSON since store handles encryption/decryption
 	var expected = `{"to":"dave","content":"secret msg"}`
 	if raw != expected {
 		t.Fatalf("got %q, want %q", raw, expected)
@@ -129,5 +129,36 @@ func TestClientEncryptionRoundTrip(t *testing.T) {
 	}
 	if got.To != "dave" || got.Content != "secret msg" {
 		t.Fatalf("got %+v, want {dave secret msg}", got)
+	}
+}
+
+func TestClientKnownPeers(t *testing.T) {
+	c := newTestClient(t)
+
+	peer := &store.KnownPeer{
+		PeerIP: "10.0.0.5",
+		PubKey: "pubkey123",
+		Status: "online",
+	}
+
+	if err := c.AddKnownPeer(peer); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := c.GetKnownPeer("10.0.0.5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.PeerIP != "10.0.0.5" || got.PubKey != "pubkey123" || got.Status != "online" {
+		t.Fatalf("got %+v", got)
+	}
+
+	if err = c.RemoveKnownPeer("10.0.0.5"); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = c.GetKnownPeer("10.0.0.5")
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("expected ErrNotExist after remove")
 	}
 }

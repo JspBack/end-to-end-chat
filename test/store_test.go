@@ -40,7 +40,7 @@ func TestNewCreatesFile(t *testing.T) {
 func TestPutGet(t *testing.T) {
 	s := newTestStore(t)
 
-	id, err := s.Put("hello", testSecret)
+	id, err := s.Chats.Put("hello", testSecret)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +48,7 @@ func TestPutGet(t *testing.T) {
 		t.Fatal("expected non-empty id")
 	}
 
-	got, err := s.Get(id, testSecret)
+	got, err := s.Chats.Get(id, testSecret)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestPutGet(t *testing.T) {
 
 func TestGetMissingKey(t *testing.T) {
 	s := newTestStore(t)
-	_, err := s.Get("nonexistent", testSecret)
+	_, err := s.Chats.Get("nonexistent", testSecret)
 	if !os.IsNotExist(err) {
 		t.Fatalf("expected ErrNotExist, got %v", err)
 	}
@@ -68,14 +68,14 @@ func TestGetMissingKey(t *testing.T) {
 func TestUpdateExisting(t *testing.T) {
 	s := newTestStore(t)
 
-	id, err := s.Put("first", testSecret)
+	id, err := s.Chats.Put("first", testSecret)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = s.Update(id, "second", testSecret); err != nil {
+	if err = s.Chats.Update(id, "second", testSecret); err != nil {
 		t.Fatal(err)
 	}
-	got, _ := s.Get(id, testSecret)
+	got, _ := s.Chats.Get(id, testSecret)
 	if got != "second" {
 		t.Fatalf("got %q, want %q", got, "second")
 	}
@@ -83,7 +83,7 @@ func TestUpdateExisting(t *testing.T) {
 
 func TestUpdateMissing(t *testing.T) {
 	s := newTestStore(t)
-	err := s.Update("nonexistent", "value", testSecret)
+	err := s.Chats.Update("nonexistent", "value", testSecret)
 	if !os.IsNotExist(err) {
 		t.Fatalf("expected ErrNotExist, got %v", err)
 	}
@@ -92,16 +92,71 @@ func TestUpdateMissing(t *testing.T) {
 func TestDelete(t *testing.T) {
 	s := newTestStore(t)
 
-	id, err := s.Put("value", testSecret)
+	id, err := s.Chats.Put("value", testSecret)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = s.Delete(id); err != nil {
+	if err = s.Chats.Delete(id); err != nil {
 		t.Fatal(err)
 	}
 
-	_, err = s.Get(id, testSecret)
+	_, err = s.Chats.Get(id, testSecret)
 	if !os.IsNotExist(err) {
 		t.Fatal("expected ErrNotExist after delete")
+	}
+}
+
+func TestKnownPeers(t *testing.T) {
+	s := newTestStore(t)
+
+	peer := &store.KnownPeer{
+		PeerIP: "192.168.1.10",
+		PubKey: "abc123",
+		Status: "online",
+	}
+
+	if err := s.KnownPeers.Add(peer); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := s.KnownPeers.Get("192.168.1.10")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.PeerIP != "192.168.1.10" || got.PubKey != "abc123" || got.Status != "online" {
+		t.Fatalf("got %+v, want {192.168.1.10 abc123 online}", got)
+	}
+
+	if err = s.KnownPeers.Remove("192.168.1.10"); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = s.KnownPeers.Get("192.168.1.10")
+	if !os.IsNotExist(err) {
+		t.Fatal("expected ErrNotExist after remove")
+	}
+}
+
+func TestKnownPeersList(t *testing.T) {
+	s := newTestStore(t)
+
+	peers := []*store.KnownPeer{
+		{PeerIP: "10.0.0.1", PubKey: "key1", Status: "online"},
+		{PeerIP: "10.0.0.2", PubKey: "key2", Status: "offline"},
+	}
+	for _, p := range peers {
+		if err := s.KnownPeers.Add(p); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for _, expected := range peers {
+		got, err := s.KnownPeers.Get(expected.PeerIP)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.PeerIP != expected.PeerIP || got.PubKey != expected.PubKey || got.Status != expected.Status {
+			t.Fatalf("got %+v, want %+v", got, expected)
+		}
 	}
 }
