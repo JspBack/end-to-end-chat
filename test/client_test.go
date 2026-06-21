@@ -9,6 +9,7 @@ import (
 
 	"github.com/JspBack/end-to-end-chat/client"
 	"github.com/JspBack/end-to-end-chat/config"
+	"github.com/JspBack/end-to-end-chat/message"
 	"github.com/JspBack/end-to-end-chat/store"
 )
 
@@ -31,12 +32,12 @@ func newTestClient(t *testing.T) *client.Client {
 
 func TestClientPutGet(t *testing.T) {
 	c := newTestClient(t)
-	msg := &client.Message{
+	msg := &message.Message{
 		To:      "alice",
 		Content: "hello",
 	}
 
-	id, err := c.Put(msg)
+	id, err := message.Put(c.Store, c.Keys.Private, msg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +45,7 @@ func TestClientPutGet(t *testing.T) {
 		t.Fatal("expected non-empty id")
 	}
 
-	got, err := c.Get(id)
+	got, err := message.Get(c.Store, c.Keys.Private, id)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +56,7 @@ func TestClientPutGet(t *testing.T) {
 
 func TestClientGetMissingKey(t *testing.T) {
 	c := newTestClient(t)
-	_, err := c.Get("nonexistent")
+	_, err := message.Get(c.Store, c.Keys.Private, "nonexistent")
 	if !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("expected ErrNotExist, got %v", err)
 	}
@@ -63,18 +64,18 @@ func TestClientGetMissingKey(t *testing.T) {
 
 func TestClientUpdateExisting(t *testing.T) {
 	c := newTestClient(t)
-	msg := &client.Message{To: "bob", Content: "hi"}
+	msg := &message.Message{To: "bob", Content: "hi"}
 
-	id, err := c.Put(msg)
+	id, err := message.Put(c.Store, c.Keys.Private, msg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	msg.Content = "updated"
-	if err = c.Update(id, msg); err != nil {
+	if err = message.Update(c.Store, c.Keys.Private, id, msg); err != nil {
 		t.Fatal(err)
 	}
 
-	got, err := c.Get(id)
+	got, err := message.Get(c.Store, c.Keys.Private, id)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +86,7 @@ func TestClientUpdateExisting(t *testing.T) {
 
 func TestClientUpdateMissing(t *testing.T) {
 	c := newTestClient(t)
-	err := c.Update("nonexistent", &client.Message{})
+	err := message.Update(c.Store, c.Keys.Private, "nonexistent", &message.Message{})
 	if !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("expected ErrNotExist, got %v", err)
 	}
@@ -93,17 +94,17 @@ func TestClientUpdateMissing(t *testing.T) {
 
 func TestClientDelete(t *testing.T) {
 	c := newTestClient(t)
-	msg := &client.Message{To: "carol", Content: "bye"}
+	msg := &message.Message{To: "carol", Content: "bye"}
 
-	id, err := c.Put(msg)
+	id, err := message.Put(c.Store, c.Keys.Private, msg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = c.Delete(id); err != nil {
+	if err = message.Delete(c.Store, id); err != nil {
 		t.Fatal(err)
 	}
 
-	_, err = c.Get(id)
+	_, err = message.Get(c.Store, c.Keys.Private, id)
 	if !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("expected ErrNotExist after delete")
 	}
@@ -112,8 +113,8 @@ func TestClientDelete(t *testing.T) {
 func TestClientEncryptionRoundTrip(t *testing.T) {
 	c := newTestClient(t)
 
-	msg := &client.Message{To: "dave", Content: "secret msg"}
-	id, err := c.Put(msg)
+	msg := &message.Message{To: "dave", Content: "secret msg"}
+	id, err := message.Put(c.Store, c.Keys.Private, msg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,12 +123,12 @@ func TestClientEncryptionRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var expected = `{"to":"dave","content":"secret msg"}`
+	var expected = `{"from":"","to":"dave","content":"secret msg"}`
 	if raw != expected {
 		t.Fatalf("got %q, want %q", raw, expected)
 	}
 
-	got, err := c.Get(id)
+	got, err := message.Get(c.Store, c.Keys.Private, id)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
+	"github.com/JspBack/end-to-end-chat/message"
 	"github.com/JspBack/end-to-end-chat/store"
 	"github.com/gorilla/websocket"
 )
@@ -58,8 +60,6 @@ func (c *Client) handleWS(w http.ResponseWriter, r *http.Request) {
 		},
 		EnableCompression: true,
 		HandshakeTimeout:  c.Timeout,
-		ReadBufferSize:    1024,
-		WriteBufferSize:   1024,
 	}
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -69,53 +69,66 @@ func (c *Client) handleWS(w http.ResponseWriter, r *http.Request) {
 
 	c.log.InfoContext(r.Context(), "peer connected", "remote", conn.RemoteAddr(), "pub_key", pubKey)
 
-	c.readLoop(r.Context(), conn)
+	conn.SetReadLimit(c.MaxMessageSize)
+	conn.SetPongHandler(func(string) error {
+		return conn.SetReadDeadline(time.Now().Add(c.Timeout))
+	})
+
+	sess := newSession(conn, c.Name, c.log, c.Timeout)
+	if err = sess.performKeyExchange(r.Context()); err != nil {
+		c.log.ErrorContext(r.Context(), "key exchange failed", "error", err)
+		conn.Close()
+
+		return
+	}
+
+	c.log.InfoContext(r.Context(), "session key established", "remote", conn.RemoteAddr(), "pub_key", pubKey)
+
+	c.readLoop(r.Context(), sess)
 }
 
-func (c *Client) readLoop(ctx context.Context, conn *websocket.Conn) {
-	defer conn.Close()
+func (c *Client) readLoop(ctx context.Context, sess *Session) {
+	defer sess.Close()
+
+	done := make(chan struct{})
+	defer close(done)
+
+	go func() {
+		select {
+		case <-ctx.Done():
+			sess.conn.Close()
+		case <-done:
+		}
+	}()
 
 	for {
-		var msg []byte
-		_, msg, err := conn.ReadMessage()
-		if err != nil {
-			c.log.InfoContext(ctx, "peer disconnected", "remote", conn.RemoteAddr(), "error", err)
-
+		if err := sess.conn.SetReadDeadline(time.Now().Add(sess.timeout)); err != nil {
+			c.log.WarnContext(ctx, "set read deadline failed", "error", err)
 			return
 		}
 
-		c.log.InfoContext(ctx, "received", "message", string(msg))
-	}
-}
+		_, data, err := sess.conn.ReadMessage()
+		if err != nil {
+			c.log.InfoContext(ctx, "peer disconnected", "remote", sess.conn.RemoteAddr(), "error", err)
+			return
+		}
 
-func (c *Client) handleAdminPeer(w http.ResponseWriter, r *http.Request) {
-	pubKey := strings.TrimPrefix(r.URL.Path, "/admin/peer/")
-	pubKey = strings.TrimSuffix(pubKey, "/approve")
-	pubKey = strings.TrimSuffix(pubKey, "/reject")
-	if pubKey == "" {
-		http.Error(w, "missing public key", http.StatusBadRequest)
-		return
-	}
+		plain, err := sess.Decrypt(data)
+		if err != nil {
+			c.log.WarnContext(ctx, "decrypt failed", "error", err)
+			continue
+		}
 
-	var status string
-	switch {
-	case strings.HasSuffix(r.URL.Path, "/approve"):
-		status = store.PeerStatusAccepted
-	case strings.HasSuffix(r.URL.Path, "/reject"):
-		status = store.PeerStatusRejected
-	default:
-		http.Error(w, "use /admin/peer/<pub_key>/approve or /reject", http.StatusBadRequest)
-		return
-	}
+		msg, err := message.ToMessage(plain)
+		if err != nil {
+			c.log.WarnContext(ctx, "decode message failed", "error", err)
+			continue
+		}
 
-	peer, err := c.SetPeerStatus(pubKey, status)
-	if err != nil {
-		c.log.ErrorContext(r.Context(), "set peer status", "error", err)
-		http.Error(w, err.Error(), http.StatusNotFound)
-		return
-	}
-	c.log.InfoContext(r.Context(), "peer status updated", "pub_key", pubKey, "status", status)
-	if _, werr := w.Write([]byte("peer " + peer.PeerIP + " " + status + "\n")); werr != nil {
-		c.log.ErrorContext(r.Context(), "write response", "error", werr)
+		sess.log.InfoContext(ctx, "received",
+			"from", msg.From,
+			"to", msg.To,
+			"content", msg.Content,
+		)
 	}
 }

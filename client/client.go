@@ -1,7 +1,6 @@
 package client
 
 import (
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -14,69 +13,29 @@ import (
 )
 
 type Client struct {
-	Name       string
-	Keys       *keys.Keys
-	Store      *store.Store
-	listenPort int
-	log        *slog.Logger
-	Timeout    time.Duration
-	RateLimit  int
-	RateWindow time.Duration
+	Name           string
+	Keys           *keys.Keys
+	Store          *store.Store
+	listenPort     int
+	log            *slog.Logger
+	Timeout        time.Duration
+	RateLimit      int
+	RateWindow     time.Duration
+	MaxMessageSize int64
 }
 
 func New(cfg config.Config, logger *slog.Logger) *Client {
 	return &Client{
-		Name:       cfg.ClientName,
-		Keys:       keys.Load(cfg.KeyFile),
-		Store:      store.New(cfg.DB),
-		listenPort: cfg.Port,
-		log:        logger,
-		Timeout:    cfg.Timeout,
-		RateLimit:  cfg.RateLimit,
-		RateWindow: cfg.RateWindow,
+		Name:           cfg.ClientName,
+		Keys:           keys.Load(cfg.KeyFile),
+		Store:          store.New(cfg.DB),
+		listenPort:     cfg.Port,
+		log:            logger,
+		Timeout:        cfg.Timeout,
+		RateLimit:      cfg.RateLimit,
+		RateWindow:     cfg.RateWindow,
+		MaxMessageSize: cfg.MaxMessageSize,
 	}
-}
-
-func (c *Client) Put(msg *Message) (string, error) {
-	plain, err := json.Marshal(msg)
-	if err != nil {
-		return "", fmt.Errorf("client: marshal: %w", err)
-	}
-	id, err := c.Store.Chats.Put(string(plain), c.Keys.Private)
-	if err != nil {
-		return "", fmt.Errorf("client: store put: %w", err)
-	}
-	return id, nil
-}
-
-func (c *Client) Get(id string) (*Message, error) {
-	plain, err := c.Store.Chats.Get(id, c.Keys.Private)
-	if err != nil {
-		return nil, fmt.Errorf("client: store get: %w", err)
-	}
-	var msg Message
-	if err = json.Unmarshal([]byte(plain), &msg); err != nil {
-		return nil, fmt.Errorf("client: unmarshal: %w", err)
-	}
-	return &msg, nil
-}
-
-func (c *Client) Update(id string, msg *Message) error {
-	plain, err := json.Marshal(msg)
-	if err != nil {
-		return fmt.Errorf("client: marshal: %w", err)
-	}
-	if err = c.Store.Chats.Update(id, string(plain), c.Keys.Private); err != nil {
-		return fmt.Errorf("client: store update: %w", err)
-	}
-	return nil
-}
-
-func (c *Client) Delete(id string) error {
-	if err := c.Store.Chats.Delete(id); err != nil {
-		return fmt.Errorf("client: store delete: %w", err)
-	}
-	return nil
 }
 
 func (c *Client) AddKnownPeer(peer *store.KnownPeer) error {
@@ -117,7 +76,6 @@ func (c *Client) Listen() {
 	addr := fmt.Sprintf(":%d", c.listenPort)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/transport/", c.handleWS)
-	mux.HandleFunc("/admin/peer/", c.handleAdminPeer)
 	srv := &http.Server{
 		Addr:              addr,
 		Handler:           httprate.LimitByIP(c.RateLimit, c.RateWindow)(mux),

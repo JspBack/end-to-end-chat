@@ -4,6 +4,7 @@ all: clean test build run
 
 build:
 	go build -ldflags="-s -w" -o bin/client ./cmd/
+	go build -ldflags="-s -w" -o bin/peer ./cmd/peer/
 
 run:
 	./bin/client
