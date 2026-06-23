@@ -176,6 +176,8 @@ func (c *Client) readLoop(ctx context.Context, sess *Session, pubKey string) {
 			c.log.WarnContext(ctx, "store message failed", "error", err)
 		}
 
-		fmt.Printf("> from=%s to=%s content=%s\n", msg.From, msg.To, msg.Content)
+		if msg.To == c.Name {
+			fmt.Printf("> from=%s to=%s content=%s\n", msg.From, msg.To, msg.Content)
+		}
 	}
 }

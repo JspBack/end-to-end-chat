@@ -9,7 +9,6 @@ import (
 
 const (
 	DefaultClientName       = "default"
-	DefaultStore            = "chat.db"
 	DefaultKeyFile          = ".generated_key"
 	DefaultPort             = 8080
 	DefaultTimeout          = 15 * time.Second
@@ -21,7 +20,6 @@ const (
 
 type Config struct {
 	ClientName     string
-	DB             string
 	KeyFile        string
 	LogLevel       slog.Level
 	Port           int
@@ -39,7 +37,6 @@ func Parse() *Config {
 	c := &Config{}
 	fs := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
 	fs.StringVar(&c.ClientName, "client", DefaultClientName, "client name to use")
-	fs.StringVar(&c.DB, "db", DefaultStore, "database name")
 	fs.StringVar(&c.KeyFile, "k", DefaultKeyFile, "key file to use")
 	fs.IntVar(&c.Port, "p", DefaultPort, "port to listen on")
 	fs.DurationVar(&c.Timeout, "t", DefaultTimeout, "timeout for operations")
@@ -47,7 +44,7 @@ func Parse() *Config {
 	fs.DurationVar(&c.RateWindow, "rate-window", DefaultRateWindow, "HTTP rate limiter window duration")
 	fs.Int64Var(&c.MaxMessageSize, "max-msg-size", MaxMessageSize, "maximum message size in bytes")
 	fs.DurationVar(&c.PingWindow, "ping-window", DefaultPingWindow, "ping window duration")
-	fs.TextVar(&c.LogLevel, "level", slog.LevelInfo, "log level (debug, info, warn, error)")
+	fs.TextVar(&c.LogLevel, "l", slog.LevelInfo, "log level (debug, info, warn, error)")
 	fs.StringVar(&c.PeerAddr, "addr", "", "address of the remote server to connect to as a peer")
 	fs.BoolVar(&c.WriteMode, "w", false, "write mode: read stdin and broadcast messages to connected peers")
 	fs.Usage = func() {

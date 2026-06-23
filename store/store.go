@@ -22,15 +22,12 @@ type Store struct {
 	KnownPeers *KnownPeerStore
 }
 
-func New(dir, dbName string) *Store {
+func New(dir string) *Store {
 	exe, err := os.Executable()
 	if err != nil {
 		panic(fmt.Errorf("store: get executable path: %w", err))
 	}
-	dbPath := filepath.Join(filepath.Dir(exe), dir, dbName)
-	if err = os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
-		panic(fmt.Errorf("store: create directory: %w", err))
-	}
+	dbPath := filepath.Join(filepath.Dir(exe), dir+".db")
 	db, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
 		panic(fmt.Errorf("store: open database: %w", err))

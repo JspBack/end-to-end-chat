@@ -42,7 +42,7 @@ func New(cfg config.Config, logger *slog.Logger) *Client {
 	return &Client{
 		Name:           cfg.ClientName,
 		Keys:           k,
-		Store:          store.New(k.Derive(), cfg.DB),
+		Store:          store.New(k.Derive()),
 		listenPort:     cfg.Port,
 		log:            logger,
 		Timeout:        cfg.Timeout,
@@ -112,45 +112,44 @@ func (c *Client) Shutdown() {
 	}
 }
 
-func (c *Client) broadcastMessage(content string) {
-	msg := message.Message{From: c.Name, To: "all", Content: content}
-
-	if _, err := message.Put(c.Store, c.Keys.Private, &msg); err != nil {
-		c.log.Warn("store broadcast failed", "error", err)
-	}
-
-	plain, err := json.Marshal(msg)
-	if err != nil {
-		c.log.Warn("encode broadcast", "error", err)
-		return
-	}
-
-	count := 0
-	c.sessions.Range(func(key, value interface{}) bool {
+func (c *Client) sendToAll(content string) {
+	c.sessions.Range(func(_, value interface{}) bool {
 		sess, ok := value.(*Session)
 		if !ok {
 			return true
 		}
-		if sendErr := sess.Send(plain); sendErr != nil {
-			c.log.Warn("send to session", "pub_key", key, "error", sendErr)
-		} else {
-			count++
-		}
+		c.sendToPeer(content, sess)
 		return true
 	})
+}
 
-	c.log.Debug("broadcast", "message", content, "peers", count)
+func (c *Client) sendToPeer(content string, sess *Session) {
+	msg := message.Message{From: c.Name, To: sess.PeerName(), Content: content}
+
+	if _, err := message.Put(c.Store, c.Keys.Private, &msg); err != nil {
+		c.log.Warn("store message failed", "error", err)
+	}
+
+	plain, err := json.Marshal(msg)
+	if err != nil {
+		c.log.Warn("encode message", "error", err)
+		return
+	}
+
+	if sendErr := sess.Send(plain); sendErr != nil {
+		c.log.Warn("send to session", "peer", sess.PeerName(), "error", sendErr)
+	}
 }
 
 func (c *Client) stdinLoop(ctx context.Context) {
 	scanner := bufio.NewScanner(os.Stdin)
-	c.log.InfoContext(ctx, "write mode enabled — type messages to broadcast to connected peers")
+	c.log.InfoContext(ctx, "write mode enabled — type messages")
 	for scanner.Scan() {
 		line := scanner.Text()
 		if line == "" {
 			continue
 		}
-		c.broadcastMessage(line)
+		c.sendToAll(line)
 	}
 }
 

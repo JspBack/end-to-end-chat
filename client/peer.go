@@ -197,7 +197,9 @@ func (c *Client) peerReadLoop(sess *Session) error {
 			c.log.Warn("store message failed", "error", err)
 		}
 
-		fmt.Printf("> from=%s to=%s content=%s\n", msg.From, msg.To, msg.Content)
+		if msg.To == c.Name {
+			fmt.Printf("> from=%s to=%s content=%s\n", msg.From, msg.To, msg.Content)
+		}
 	}
 }
 
