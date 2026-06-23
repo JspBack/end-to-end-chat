@@ -2,7 +2,7 @@ package client
 
 import (
 	"context"
-	"fmt"
+	"encoding/hex"
 	"net"
 	"net/http"
 	"os"
@@ -14,10 +14,21 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+const pubKeyLen = 64
+
+func isValidPubKey(s string) bool {
+	if len(s) != pubKeyLen {
+		return false
+	}
+	b, err := hex.DecodeString(s)
+	return err == nil && len(b) == 32
+}
+
 func (c *Client) handleWS(w http.ResponseWriter, r *http.Request) {
 	pubKey := strings.TrimPrefix(r.URL.Path, "/transport/")
-	if pubKey == "" {
-		http.Error(w, "missing public key", http.StatusBadRequest)
+
+	if !isValidPubKey(pubKey) {
+		http.Error(w, "invalid public key\n", http.StatusBadRequest)
 		return
 	}
 
@@ -48,10 +59,14 @@ func (c *Client) handleWS(w http.ResponseWriter, r *http.Request) {
 		status = peer.Status
 	}
 
-	var upgrader = websocket.Upgrader{
-		CheckOrigin: func(_ *http.Request) bool {
-			return true
-		},
+	if status == store.PeerStatusRejected {
+		c.log.DebugContext(r.Context(), "rejected peer attempted reconnect", "pub_key", pubKey)
+		http.Error(w, "forbidden\n", http.StatusForbidden)
+		return
+	}
+
+	upgrader := websocket.Upgrader{
+		CheckOrigin:       func(_ *http.Request) bool { return true },
 		EnableCompression: true,
 		HandshakeTimeout:  c.Timeout,
 	}
@@ -73,7 +88,7 @@ func (c *Client) closeExistingSession(pubKey string, conn *websocket.Conn) {
 	if old, loaded := c.sessions.LoadAndDelete(pubKey); loaded {
 		if oldSess, ok := old.(*Session); ok {
 			c.log.Debug("replacing existing session", "pub_key", pubKey, "remote", conn.RemoteAddr())
-			oldSess.Close()
+			_ = oldSess.closeConn()
 		}
 	}
 }
@@ -84,27 +99,27 @@ func (c *Client) startSession(ctx context.Context, conn *websocket.Conn, pubKey,
 		return conn.SetReadDeadline(time.Now().Add(c.Timeout))
 	})
 
-	sess := newSession(conn, c.Name, c.Keys.Public, c.log, c.Timeout)
-	sess.SetStatus(status)
+	sess := newSession(conn, c.Name, c.Keys, c.log, c.Timeout, c.RateLimit, c.RateWindow)
+	sess.setStatus(status)
 
-	if err := sess.performKeyExchange(ctx); err != nil {
-		c.log.ErrorContext(ctx, "key exchange failed", "error", err)
+	if err := sess.handshake(ctx, false); err != nil {
+		c.log.ErrorContext(ctx, "handshake failed", "error", err)
 		conn.Close()
 		return
 	}
 
 	c.sessions.Store(pubKey, sess)
 
-	c.log.DebugContext(ctx, "session key established",
+	c.log.DebugContext(ctx, "session ready",
 		"remote", conn.RemoteAddr(), "pub_key", pubKey,
-		"peer_name", sess.PeerName(), "status", status,
+		"peer_name", sess.peerName(), "status", status,
 	)
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	go c.pingLoop(ctx, sess, cancel)
 
-	c.readLoop(ctx, sess, pubKey)
+	c.recvLoop(ctx, sess, pubKey)
 }
 
 func (c *Client) pingLoop(ctx context.Context, sess *Session, cancel context.CancelFunc) {
@@ -126,10 +141,10 @@ func (c *Client) pingLoop(ctx context.Context, sess *Session, cancel context.Can
 	}
 }
 
-func (c *Client) readLoop(ctx context.Context, sess *Session, pubKey string) {
+func (c *Client) recvLoop(ctx context.Context, sess *Session, pubKey string) {
 	defer func() {
 		c.sessions.Delete(pubKey)
-		sess.Close()
+		_ = sess.closeConn()
 	}()
 
 	done := make(chan struct{})
@@ -156,13 +171,18 @@ func (c *Client) readLoop(ctx context.Context, sess *Session, pubKey string) {
 			return
 		}
 
-		plain, err := sess.Decrypt(data)
+		plain, err := sess.decrypt(data)
 		if err != nil {
 			c.log.WarnContext(ctx, "decrypt failed", "error", err)
 			continue
 		}
 
-		if sess.Status() != store.PeerStatusAccepted {
+		if !sess.msgLimiter.Allow() {
+			c.log.WarnContext(ctx, "rate limit exceeded, dropping message", "remote", sess.conn.RemoteAddr())
+			continue
+		}
+
+		if sess.status() != store.PeerStatusAccepted {
 			continue
 		}
 
@@ -177,7 +197,8 @@ func (c *Client) readLoop(ctx context.Context, sess *Session, pubKey string) {
 		}
 
 		if msg.To == c.Name {
-			fmt.Printf("> from=%s to=%s content=%s\n", msg.From, msg.To, msg.Content)
+			c.log.DebugContext(ctx, "message received",
+				"from", msg.From, "to", msg.To, "content", msg.Content)
 		}
 	}
 }

@@ -4,8 +4,12 @@ import (
 	"flag"
 	"log/slog"
 	"os"
+	"strings"
 	"time"
+	"unicode"
 )
+
+const maxNameLen = 64
 
 const (
 	DefaultClientName       = "default"
@@ -28,9 +32,28 @@ type Config struct {
 	RateWindow     time.Duration
 	MaxMessageSize int64
 	PingWindow     time.Duration
+	CertFile       string
+	KeyFileTLS     string
 
 	PeerAddr  string
 	WriteMode bool
+}
+
+func sanitizeName(s string) string {
+	s = strings.Map(func(r rune) rune {
+		if unicode.IsPrint(r) {
+			return r
+		}
+		return -1
+	}, s)
+	if len(s) > maxNameLen {
+		s = s[:maxNameLen]
+	}
+	return s
+}
+
+func (c *Config) UseTLS() bool {
+	return c.CertFile != "" && c.KeyFileTLS != ""
 }
 
 func Parse() *Config {
@@ -47,6 +70,8 @@ func Parse() *Config {
 	fs.TextVar(&c.LogLevel, "l", slog.LevelInfo, "log level (debug, info, warn, error)")
 	fs.StringVar(&c.PeerAddr, "addr", "", "address of the remote server to connect to as a peer")
 	fs.BoolVar(&c.WriteMode, "w", false, "write mode: read stdin and broadcast messages to connected peers")
+	fs.StringVar(&c.CertFile, "cert", "", "TLS certificate file path")
+	fs.StringVar(&c.KeyFileTLS, "key", "", "TLS private key file path")
 	fs.Usage = func() {
 		println("Usage:", fs.Name(), "[options]")
 		println("Options:")
@@ -56,5 +81,6 @@ func Parse() *Config {
 		fs.Usage()
 		os.Exit(1)
 	}
+	c.ClientName = sanitizeName(c.ClientName)
 	return c
 }

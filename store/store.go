@@ -32,7 +32,12 @@ func New(dir string) *Store {
 	if err != nil {
 		panic(fmt.Errorf("store: open database: %w", err))
 	}
+	db.SetMaxOpenConns(1)
+
 	for _, q := range []string{
+		"PRAGMA journal_mode=WAL",
+		"PRAGMA busy_timeout=5000",
+
 		"CREATE TABLE IF NOT EXISTS chats (id TEXT PRIMARY KEY, value TEXT)",
 		"CREATE TABLE IF NOT EXISTS known_peers (pub_key TEXT PRIMARY KEY, peer_ip TEXT, status TEXT)",
 	} {

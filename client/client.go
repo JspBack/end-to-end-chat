@@ -3,6 +3,7 @@ package client
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -32,6 +33,9 @@ type Client struct {
 	sessions   sync.Map // pubKey -> *Session
 	pingPeriod time.Duration
 	srv        *http.Server
+	tlsConfig  *tls.Config
+	certFile   string
+	keyFileTLS string
 
 	peerAddr  string
 	writeMode bool
@@ -39,6 +43,17 @@ type Client struct {
 
 func New(cfg config.Config, logger *slog.Logger) *Client {
 	k := keys.Load(cfg.KeyFile)
+
+	var tlsConfig *tls.Config
+	if cfg.UseTLS() {
+		cert, err := tls.LoadX509KeyPair(cfg.CertFile, cfg.KeyFileTLS)
+		if err != nil {
+			logger.Error("load TLS cert", "error", err)
+			os.Exit(1)
+		}
+		tlsConfig = &tls.Config{Certificates: []tls.Certificate{cert}}
+	}
+
 	return &Client{
 		Name:           cfg.ClientName,
 		Keys:           k,
@@ -50,9 +65,16 @@ func New(cfg config.Config, logger *slog.Logger) *Client {
 		RateWindow:     cfg.RateWindow,
 		MaxMessageSize: cfg.MaxMessageSize,
 		pingPeriod:     cfg.PingWindow,
+		tlsConfig:      tlsConfig,
+		certFile:       cfg.CertFile,
+		keyFileTLS:     cfg.KeyFileTLS,
 		peerAddr:       cfg.PeerAddr,
 		writeMode:      cfg.WriteMode,
 	}
+}
+
+func (c *Client) UseTLS() bool {
+	return c.tlsConfig != nil
 }
 
 func (c *Client) AddKnownPeer(peer *store.KnownPeer) error {
@@ -100,7 +122,7 @@ func (c *Client) ListKnownPeers() ([]store.KnownPeer, error) {
 func (c *Client) Shutdown() {
 	c.sessions.Range(func(_, value interface{}) bool {
 		if sess, ok := value.(*Session); ok {
-			sess.Close()
+			_ = sess.closeConn()
 		}
 		return true
 	})
@@ -112,19 +134,8 @@ func (c *Client) Shutdown() {
 	}
 }
 
-func (c *Client) sendToAll(content string) {
-	c.sessions.Range(func(_, value interface{}) bool {
-		sess, ok := value.(*Session)
-		if !ok {
-			return true
-		}
-		c.sendToPeer(content, sess)
-		return true
-	})
-}
-
-func (c *Client) sendToPeer(content string, sess *Session) {
-	msg := message.Message{From: c.Name, To: sess.PeerName(), Content: content}
+func (c *Client) sendMessage(sess *Session, content string) error {
+	msg := message.Message{From: c.Name, To: sess.peerName(), Content: content}
 
 	if _, err := message.Put(c.Store, c.Keys.Private, &msg); err != nil {
 		c.log.Warn("store message failed", "error", err)
@@ -132,13 +143,20 @@ func (c *Client) sendToPeer(content string, sess *Session) {
 
 	plain, err := json.Marshal(msg)
 	if err != nil {
-		c.log.Warn("encode message", "error", err)
-		return
+		return fmt.Errorf("encode message: %w", err)
 	}
+	return sess.send(plain)
+}
 
-	if sendErr := sess.Send(plain); sendErr != nil {
-		c.log.Warn("send to session", "peer", sess.PeerName(), "error", sendErr)
-	}
+func (c *Client) sendToAll(content string) {
+	c.sessions.Range(func(_, value interface{}) bool {
+		if sess, ok := value.(*Session); ok {
+			if err := c.sendMessage(sess, content); err != nil {
+				c.log.Warn("send to session", "peer", sess.peerName(), "error", err)
+			}
+		}
+		return true
+	})
 }
 
 func (c *Client) stdinLoop(ctx context.Context) {
@@ -171,8 +189,14 @@ func (c *Client) Listen() {
 		WriteTimeout:      c.Timeout,
 		IdleTimeout:       c.Timeout,
 	}
-	c.log.Info("listening", "addr", addr, "client", c.Name)
-	if err := c.srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		c.log.Error("listen", "err", err)
+	c.log.Info("listening", "addr", addr, "client", c.Name, "tls", c.UseTLS())
+	var serveErr error
+	if c.UseTLS() {
+		serveErr = c.srv.ListenAndServeTLS(c.certFile, c.keyFileTLS)
+	} else {
+		serveErr = c.srv.ListenAndServe()
+	}
+	if serveErr != nil && serveErr != http.ErrServerClosed {
+		c.log.Error("listen", "err", serveErr)
 	}
 }

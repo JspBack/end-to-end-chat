@@ -62,6 +62,28 @@ func (t *ChatStore) Update(id, value, secret string) error {
 	return t.PutWithID(id, value, secret)
 }
 
+func (t *ChatStore) List() ([]string, error) {
+	q := "SELECT id FROM chats ORDER BY rowid"
+	rows, err := t.db.QueryContext(context.Background(), q)
+	if err != nil {
+		return nil, fmt.Errorf("store: list: %w", err)
+	}
+	defer rows.Close()
+
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err = rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("store: scan: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: list rows: %w", err)
+	}
+	return ids, nil
+}
+
 func (t *ChatStore) Delete(id string) error {
 	q := "DELETE FROM chats WHERE id = ?"
 	if _, err := t.db.ExecContext(context.Background(), q, id); err != nil {
