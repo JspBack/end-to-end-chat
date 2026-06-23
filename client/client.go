@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/JspBack/end-to-end-chat/config"
@@ -22,6 +23,9 @@ type Client struct {
 	RateLimit      int
 	RateWindow     time.Duration
 	MaxMessageSize int64
+
+	sessions   sync.Map // pubKey -> *Session
+	pingPeriod time.Duration
 }
 
 func New(cfg config.Config, logger *slog.Logger) *Client {
@@ -35,6 +39,7 @@ func New(cfg config.Config, logger *slog.Logger) *Client {
 		RateLimit:      cfg.RateLimit,
 		RateWindow:     cfg.RateWindow,
 		MaxMessageSize: cfg.MaxMessageSize,
+		pingPeriod:     cfg.PingWindow,
 	}
 }
 

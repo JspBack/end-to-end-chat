@@ -67,28 +67,77 @@ func (c *Client) handleWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	c.closeExistingSession(pubKey, conn)
+
 	c.log.InfoContext(r.Context(), "peer connected", "remote", conn.RemoteAddr(), "pub_key", pubKey)
 
+	c.startSession(r.Context(), conn, pubKey)
+}
+
+func (c *Client) closeExistingSession(pubKey string, conn *websocket.Conn) {
+	old, loaded := c.sessions.LoadAndDelete(pubKey)
+	if !loaded {
+		return
+	}
+	oldSess, ok := old.(*Session)
+	if !ok {
+		return
+	}
+	c.log.Info("replacing existing session", "pub_key", pubKey, "remote", conn.RemoteAddr())
+	oldSess.Close()
+}
+
+func (c *Client) startSession(ctx context.Context, conn *websocket.Conn, pubKey string) {
 	conn.SetReadLimit(c.MaxMessageSize)
 	conn.SetPongHandler(func(string) error {
 		return conn.SetReadDeadline(time.Now().Add(c.Timeout))
 	})
 
 	sess := newSession(conn, c.Name, c.log, c.Timeout)
-	if err = sess.performKeyExchange(r.Context()); err != nil {
-		c.log.ErrorContext(r.Context(), "key exchange failed", "error", err)
+	if err := sess.performKeyExchange(ctx); err != nil {
+		c.log.ErrorContext(ctx, "key exchange failed", "error", err)
 		conn.Close()
-
 		return
 	}
 
-	c.log.InfoContext(r.Context(), "session key established", "remote", conn.RemoteAddr(), "pub_key", pubKey)
+	c.log.InfoContext(ctx, "session key established",
+		"remote", conn.RemoteAddr(), "pub_key", pubKey,
+		"peer_name", sess.PeerName(),
+	)
 
-	c.readLoop(r.Context(), sess)
+	c.sessions.Store(pubKey, sess)
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go c.pingLoop(ctx, sess, cancel)
+
+	c.readLoop(ctx, sess, pubKey)
 }
 
-func (c *Client) readLoop(ctx context.Context, sess *Session) {
-	defer sess.Close()
+func (c *Client) pingLoop(ctx context.Context, sess *Session, cancel context.CancelFunc) {
+	ticker := time.NewTicker(c.pingPeriod)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := sess.conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(5*time.Second)); err != nil {
+				c.log.WarnContext(ctx, "ping failed, closing session",
+					"remote", sess.conn.RemoteAddr(), "error", err)
+				cancel()
+				return
+			}
+		}
+	}
+}
+
+func (c *Client) readLoop(ctx context.Context, sess *Session, pubKey string) {
+	defer func() {
+		c.sessions.Delete(pubKey)
+		sess.Close()
+	}()
 
 	done := make(chan struct{})
 	defer close(done)
@@ -109,7 +158,8 @@ func (c *Client) readLoop(ctx context.Context, sess *Session) {
 
 		_, data, err := sess.conn.ReadMessage()
 		if err != nil {
-			c.log.InfoContext(ctx, "peer disconnected", "remote", sess.conn.RemoteAddr(), "error", err)
+			c.log.InfoContext(ctx, "peer disconnected",
+				"remote", sess.conn.RemoteAddr(), "error", err)
 			return
 		}
 

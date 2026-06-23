@@ -224,6 +224,12 @@ func (s *Session) PeerPubKey() string {
 	return s.peerPubKey
 }
 
+func (s *Session) PeerName() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.peerName
+}
+
 func (s *Session) Close() error {
 	s.mu.Lock()
 	for i := range s.sessionKey {

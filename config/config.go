@@ -15,6 +15,7 @@ type Config struct {
 	RateLimit      int
 	RateWindow     time.Duration
 	MaxMessageSize int64
+	PingWindow     time.Duration
 }
 
 const (
@@ -26,6 +27,7 @@ const (
 	DefaultRateLimit        = 100
 	DefaultRateWindow       = time.Minute
 	MaxMessageSize    int64 = 1 << 20
+	DefaultPingWindow       = 5 * time.Second
 )
 
 func Parse() *Config {
@@ -39,6 +41,7 @@ func Parse() *Config {
 	fs.IntVar(&c.RateLimit, "rate-limit", DefaultRateLimit, "HTTP requests per window per IP")
 	fs.DurationVar(&c.RateWindow, "rate-window", DefaultRateWindow, "HTTP rate limiter window duration")
 	fs.Int64Var(&c.MaxMessageSize, "max-msg-size", MaxMessageSize, "maximum message size in bytes")
+	fs.DurationVar(&c.PingWindow, "ping-window", DefaultPingWindow, "ping window duration")
 	fs.Usage = func() {
 		println("Usage:", fs.Name(), "[options]")
 		println("Options:")

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/ecdh"
@@ -47,53 +48,92 @@ func main() {
 	name := flag.String("name", "peer", "client name to identify to the server")
 	flag.Parse()
 
-	if err := run(logger, *addr, *pubKey, *name); err != nil {
-		logger.Error("fatal", "error", err)
-		os.Exit(1)
-	}
+	run(logger, *addr, *pubKey, *name)
 }
 
 const maxMessageSize = 65536
 
-func run(logger *slog.Logger, addr, pubKey, name string) error {
+func run(logger *slog.Logger, addr, pubKey, name string) {
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt)
+
+	// Single stdin reader goroutine shared across reconnections.
+	lines := make(chan string, 100)
+	go readStdin(lines)
+
+	for {
+		select {
+		case <-sig:
+			logger.Info("shutting down")
+			return
+		default:
+		}
+
+		err := connectAndChat(logger, addr, pubKey, name, sig, lines)
+		if err != nil {
+			logger.Info("connection lost, reconnecting in 2s...", "error", err)
+			select {
+			case <-sig:
+				logger.Info("shutting down")
+				return
+			case <-time.After(2 * time.Second):
+			}
+		}
+	}
+}
+
+func readStdin(lines chan<- string) {
+	scanner := bufio.NewScanner(os.Stdin)
+	for scanner.Scan() {
+		lines <- scanner.Text()
+	}
+}
+
+func connectAndChat(logger *slog.Logger, addr, pubKey, name string, sig chan os.Signal, lines <-chan string) error {
 	u := url.URL{Scheme: "ws", Host: addr, Path: "/transport/" + pubKey}
 
 	c, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
 	if err != nil {
 		return fmt.Errorf("dial: %w", err)
 	}
-	defer c.Close()
 
 	logger.Info("connected", "addr", u.String())
 
 	sessionKey, serverName, err := handshake(c, name)
 	if err != nil {
+		c.Close()
 		return fmt.Errorf("handshake: %w", err)
 	}
 
 	logger.Info("session key established", "server_name", serverName)
 
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, os.Interrupt)
+	// Set up pong handler so server pings keep us alive.
+	c.SetPongHandler(func(string) error {
+		return c.SetReadDeadline(time.Now().Add(60 * time.Second))
+	})
 
-	done := make(chan struct{})
-	defer close(done)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	errCh := make(chan error, 2)
 
 	go func() {
-		select {
-		case <-sig:
-		case <-done:
-		}
-		c.Close()
+		errCh <- readLoop(logger, c, sessionKey)
+	}()
+	go func() {
+		errCh <- writeLoop(ctx, logger, c, sessionKey, name, serverName, lines)
 	}()
 
-	go readLoop(logger, c, sessionKey)
-	go writeLoop(logger, c, sessionKey, name, serverName)
-
-	<-sig
-	logger.Info("shutting down")
-
-	return nil
+	select {
+	case e := <-errCh:
+		cancel()
+		c.Close()
+		return e
+	case <-sig:
+		cancel()
+		c.Close()
+		return nil
+	}
 }
 
 func handshake(c *websocket.Conn, name string) ([]byte, string, error) {
@@ -229,19 +269,17 @@ func decrypt(sessionKey, data []byte) ([]byte, error) {
 	return plain, nil
 }
 
-func readLoop(logger *slog.Logger, c *websocket.Conn, sessionKey []byte) {
+func readLoop(logger *slog.Logger, c *websocket.Conn, sessionKey []byte) error {
 	c.SetReadLimit(maxMessageSize)
 
 	for {
 		if err := c.SetReadDeadline(time.Now().Add(60 * time.Second)); err != nil {
-			logger.Warn("set read deadline", "error", err)
-			return
+			return fmt.Errorf("set read deadline: %w", err)
 		}
 
 		_, data, err := c.ReadMessage()
 		if err != nil {
-			logger.Info("read error", "error", err)
-			return
+			return fmt.Errorf("read: %w", err)
 		}
 
 		plain, err := decrypt(sessionKey, data)
@@ -260,29 +298,37 @@ func readLoop(logger *slog.Logger, c *websocket.Conn, sessionKey []byte) {
 	}
 }
 
-func writeLoop(logger *slog.Logger, c *websocket.Conn, sessionKey []byte, name, serverName string) {
-	scanner := bufio.NewScanner(os.Stdin)
-	for scanner.Scan() {
-		msg := Message{From: name, To: serverName, Content: scanner.Text()}
-		plain, err := json.Marshal(msg)
-		if err != nil {
-			logger.Warn("encode error", "error", err)
-			continue
-		}
+func writeLoop(
+	ctx context.Context, logger *slog.Logger, c *websocket.Conn,
+	sessionKey []byte, name, serverName string, lines <-chan string,
+) error {
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case line, ok := <-lines:
+			if !ok {
+				return nil
+			}
+			msg := Message{From: name, To: serverName, Content: line}
+			plain, err := json.Marshal(msg)
+			if err != nil {
+				logger.WarnContext(ctx, "encode error", "error", err)
+				continue
+			}
 
-		enc, err := encrypt(sessionKey, plain)
-		if err != nil {
-			logger.Warn("encrypt error", "error", err)
-			continue
-		}
+			enc, err := encrypt(sessionKey, plain)
+			if err != nil {
+				logger.WarnContext(ctx, "encrypt error", "error", err)
+				continue
+			}
 
-		if err = c.SetWriteDeadline(time.Now().Add(10 * time.Second)); err != nil {
-			logger.Warn("set write deadline", "error", err)
-			return
-		}
-		if err = c.WriteMessage(websocket.TextMessage, enc); err != nil {
-			logger.Info("write error", "error", err)
-			return
+			if err = c.SetWriteDeadline(time.Now().Add(10 * time.Second)); err != nil {
+				return fmt.Errorf("set write deadline: %w", err)
+			}
+			if err = c.WriteMessage(websocket.TextMessage, enc); err != nil {
+				return fmt.Errorf("write: %w", err)
+			}
 		}
 	}
 }
