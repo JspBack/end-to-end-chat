@@ -10,7 +10,11 @@ import (
 	"github.com/google/uuid"
 )
 
-func (t *TableStore) Put(value, secret string) (string, error) {
+type ChatStore struct {
+	db *sql.DB
+}
+
+func (t *ChatStore) Put(value, secret string) (string, error) {
 	id := uuid.New().String()
 	if err := t.PutWithID(id, value, secret); err != nil {
 		return "", err
@@ -18,7 +22,7 @@ func (t *TableStore) Put(value, secret string) (string, error) {
 	return id, nil
 }
 
-func (t *TableStore) PutWithID(id, value, secret string) error {
+func (t *ChatStore) PutWithID(id, value, secret string) error {
 	encrypted, err := encrypt(secret, []byte(value))
 	if err != nil {
 		return fmt.Errorf("store: encrypt: %w", err)
@@ -30,7 +34,7 @@ func (t *TableStore) PutWithID(id, value, secret string) error {
 	return nil
 }
 
-func (t *TableStore) Get(id, secret string) (string, error) {
+func (t *ChatStore) Get(id, secret string) (string, error) {
 	var encrypted string
 	q := "SELECT value FROM chats WHERE id = ?"
 	if err := t.db.QueryRowContext(context.Background(), q, id).Scan(&encrypted); err != nil {
@@ -46,7 +50,7 @@ func (t *TableStore) Get(id, secret string) (string, error) {
 	return string(plain), nil
 }
 
-func (t *TableStore) Update(id, value, secret string) error {
+func (t *ChatStore) Update(id, value, secret string) error {
 	var exists bool
 	q := "SELECT EXISTS(SELECT 1 FROM chats WHERE id = ?)"
 	if err := t.db.QueryRowContext(context.Background(), q, id).Scan(&exists); err != nil {
@@ -58,7 +62,7 @@ func (t *TableStore) Update(id, value, secret string) error {
 	return t.PutWithID(id, value, secret)
 }
 
-func (t *TableStore) Delete(id string) error {
+func (t *ChatStore) Delete(id string) error {
 	q := "DELETE FROM chats WHERE id = ?"
 	if _, err := t.db.ExecContext(context.Background(), q, id); err != nil {
 		return fmt.Errorf("store: delete: %w", err)

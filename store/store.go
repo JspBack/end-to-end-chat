@@ -18,36 +18,20 @@ import (
 )
 
 type Store struct {
-	Chats      *TableStore
+	Chats      *ChatStore
 	KnownPeers *KnownPeerStore
 }
 
-type TableStore struct {
-	db    *sql.DB
-	table string
-}
-
-const (
-	PeerStatusPending  = "pending"
-	PeerStatusAccepted = "accepted"
-	PeerStatusRejected = "rejected"
-)
-
-type KnownPeer struct {
-	PeerIP string
-	PubKey string
-	Status string
-}
-
-type KnownPeerStore struct {
-	db *sql.DB
-}
-
-func New(dbName string) *Store {
-	if err := os.MkdirAll(filepath.Dir(dbName), 0755); err != nil {
+func New(dir, dbName string) *Store {
+	exe, err := os.Executable()
+	if err != nil {
+		panic(fmt.Errorf("store: get executable path: %w", err))
+	}
+	dbPath := filepath.Join(filepath.Dir(exe), dir, dbName)
+	if err = os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
 		panic(fmt.Errorf("store: create directory: %w", err))
 	}
-	db, err := sql.Open("sqlite3", dbName)
+	db, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
 		panic(fmt.Errorf("store: open database: %w", err))
 	}
@@ -60,7 +44,7 @@ func New(dbName string) *Store {
 		}
 	}
 	return &Store{
-		Chats:      &TableStore{db: db, table: "chats"},
+		Chats:      &ChatStore{db: db},
 		KnownPeers: &KnownPeerStore{db: db},
 	}
 }

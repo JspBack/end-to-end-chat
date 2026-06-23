@@ -8,6 +8,22 @@ import (
 	"os"
 )
 
+const (
+	PeerStatusPending  = "pending"
+	PeerStatusAccepted = "accepted"
+	PeerStatusRejected = "rejected"
+)
+
+type KnownPeer struct {
+	PeerIP string `json:"peer_ip"`
+	PubKey string `json:"pub_key"`
+	Status string `json:"status"`
+}
+
+type KnownPeerStore struct {
+	db *sql.DB
+}
+
 func (k *KnownPeerStore) Add(peer *KnownPeer) error {
 	q := "INSERT OR REPLACE INTO known_peers (peer_ip, pub_key, status) VALUES (?, ?, ?)"
 	if _, err := k.db.ExecContext(context.Background(), q, peer.PeerIP, peer.PubKey, peer.Status); err != nil {
@@ -38,6 +54,28 @@ func (k *KnownPeerStore) GetByPubKey(pubKey string) (*KnownPeer, error) {
 		return nil, fmt.Errorf("store: get known peer by pub_key: %w", err)
 	}
 	return &peer, nil
+}
+
+func (k *KnownPeerStore) List() ([]KnownPeer, error) {
+	q := "SELECT peer_ip, pub_key, status FROM known_peers"
+	rows, err := k.db.QueryContext(context.Background(), q)
+	if err != nil {
+		return nil, fmt.Errorf("store: list known peers: %w", err)
+	}
+	defer rows.Close()
+
+	var peers []KnownPeer
+	for rows.Next() {
+		var peer KnownPeer
+		if err = rows.Scan(&peer.PeerIP, &peer.PubKey, &peer.Status); err != nil {
+			return nil, fmt.Errorf("store: scan peer: %w", err)
+		}
+		peers = append(peers, peer)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: rows iteration: %w", err)
+	}
+	return peers, nil
 }
 
 func (k *KnownPeerStore) Remove(peerIP string) error {

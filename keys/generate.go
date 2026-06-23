@@ -2,6 +2,7 @@ package keys
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"os"
@@ -20,6 +21,12 @@ func generate() []byte {
 }
 
 func Load(keyFile string) *Keys {
+	exe, err := os.Executable()
+	if err != nil {
+		panic(fmt.Errorf("keys: get executable path: %w", err))
+	}
+	keyFile = filepath.Join(filepath.Dir(exe), keyFile)
+
 	b, err := os.ReadFile(keyFile)
 	if err != nil {
 		if err = os.MkdirAll(filepath.Dir(keyFile), 0755); err != nil {
@@ -34,4 +41,9 @@ func Load(keyFile string) *Keys {
 		Public:  hex.EncodeToString(generate()),
 		Private: hex.EncodeToString(b),
 	}
+}
+
+func (k *Keys) Derive() string {
+	h := sha256.Sum256([]byte(k.Private))
+	return hex.EncodeToString(h[:])
 }

@@ -3,17 +3,17 @@
 all: clean test build run
 
 build:
-	go build -ldflags="-s -w" -o bin/client ./cmd/
-	go build -ldflags="-s -w" -o bin/peer ./cmd/peer/
+	go build -ldflags="-s -w" -o bin_client/client ./cmd/
+	go build -ldflags="-s -w" -o bin_peer/peer ./cmd/
 
 run:
-	./bin/client
+	./bin_client/client
 
 test:
 	go test ./test
 
 clean:
-	rm -rf bin/
+	rm -rf bin*
 	rm -rf data/
 
 pre-all:

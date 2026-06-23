@@ -19,10 +19,13 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+const keyExchangeType = "key_exchange"
+
 type keyExchangeMsg struct {
-	Type       string `json:"type"`
-	PubKey     string `json:"pub_key"`
-	ClientName string `json:"client_name"`
+	Type         string `json:"type"`
+	PubKey       string `json:"pub_key"`
+	StaticPubKey string `json:"static_pub_key"`
+	ClientName   string `json:"client_name"`
 }
 
 type encryptedMsg struct {
@@ -32,22 +35,26 @@ type encryptedMsg struct {
 }
 
 type Session struct {
-	mu         sync.RWMutex
-	conn       *websocket.Conn
-	ourName    string
-	peerName   string
-	log        *slog.Logger
-	sessionKey []byte
-	peerPubKey string
-	timeout    time.Duration
+	mu               sync.RWMutex
+	conn             *websocket.Conn
+	ourName          string
+	ourStaticPubKey  string
+	peerName         string
+	log              *slog.Logger
+	sessionKey       []byte
+	peerPubKey       string // ephemeral ECDH public key
+	peerStaticPubKey string // static identity public key
+	timeout          time.Duration
+	status           string
 }
 
-func newSession(conn *websocket.Conn, ourName string, log *slog.Logger, timeout time.Duration) *Session {
+func newSession(conn *websocket.Conn, ourName, ourStaticPubKey string, log *slog.Logger, timeout time.Duration) *Session {
 	return &Session{
-		conn:    conn,
-		ourName: ourName,
-		log:     log,
-		timeout: timeout,
+		conn:            conn,
+		ourName:         ourName,
+		ourStaticPubKey: ourStaticPubKey,
+		log:             log,
+		timeout:         timeout,
 	}
 }
 
@@ -76,7 +83,7 @@ func (s *Session) performKeyExchange(ctx context.Context) error {
 	if err = json.Unmarshal(raw, &msg); err != nil {
 		return fmt.Errorf("session: unmarshal key exchange: %w", err)
 	}
-	if msg.Type != "key_exchange" {
+	if msg.Type != keyExchangeType {
 		return fmt.Errorf("session: expected key_exchange, got %s", msg.Type)
 	}
 
@@ -100,14 +107,16 @@ func (s *Session) performKeyExchange(ctx context.Context) error {
 	s.mu.Lock()
 	s.sessionKey = hash[:]
 	s.peerPubKey = msg.PubKey
+	s.peerStaticPubKey = msg.StaticPubKey
 	s.peerName = msg.ClientName
 	s.mu.Unlock()
 
 	ourPubKey := hex.EncodeToString(ourKey.PublicKey().Bytes())
 	resp, err := json.Marshal(keyExchangeMsg{
-		Type:       "key_exchange",
-		PubKey:     ourPubKey,
-		ClientName: s.ourName,
+		Type:         keyExchangeType,
+		PubKey:       ourPubKey,
+		StaticPubKey: s.ourStaticPubKey,
+		ClientName:   s.ourName,
 	})
 	if err != nil {
 		return fmt.Errorf("session: marshal response: %w", err)
@@ -123,7 +132,84 @@ func (s *Session) performKeyExchange(ctx context.Context) error {
 		return fmt.Errorf("session: clear write deadline: %w", err)
 	}
 
-	s.log.InfoContext(ctx, "session key established",
+	s.log.DebugContext(ctx, "session key established",
+		"remote", s.conn.RemoteAddr(),
+		"peer_name", s.peerName,
+		"peer_pub_key", s.peerPubKey,
+	)
+
+	return nil
+}
+
+func (s *Session) performInitiatorKeyExchange(ctx context.Context) error {
+	curve := ecdh.X25519()
+	ourKey, err := curve.GenerateKey(rand.Reader)
+	if err != nil {
+		return fmt.Errorf("session: generate key: %w", err)
+	}
+
+	ourPub := hex.EncodeToString(ourKey.PublicKey().Bytes())
+	msg, _ := json.Marshal(keyExchangeMsg{
+		Type:         keyExchangeType,
+		PubKey:       ourPub,
+		StaticPubKey: s.ourStaticPubKey,
+		ClientName:   s.ourName,
+	})
+
+	if err = s.conn.SetWriteDeadline(time.Now().Add(s.timeout)); err != nil {
+		return fmt.Errorf("session: set write deadline: %w", err)
+	}
+	if err = s.conn.WriteMessage(websocket.TextMessage, msg); err != nil {
+		return fmt.Errorf("session: send our key: %w", err)
+	}
+
+	if err = s.conn.SetReadDeadline(time.Now().Add(s.timeout)); err != nil {
+		return fmt.Errorf("session: set read deadline: %w", err)
+	}
+
+	var raw []byte
+	_, raw, err = s.conn.ReadMessage()
+	if err != nil {
+		return fmt.Errorf("session: read peer key: %w", err)
+	}
+
+	if err = s.conn.SetReadDeadline(time.Time{}); err != nil {
+		return fmt.Errorf("session: clear read deadline: %w", err)
+	}
+
+	var reply keyExchangeMsg
+	if err = json.Unmarshal(raw, &reply); err != nil {
+		return fmt.Errorf("session: unmarshal key exchange: %w", err)
+	}
+	if reply.Type != keyExchangeType {
+		return fmt.Errorf("session: expected key_exchange, got %s", reply.Type)
+	}
+
+	peerKeyBytes, err := hex.DecodeString(reply.PubKey)
+	if err != nil {
+		return fmt.Errorf("session: decode peer key: %w", err)
+	}
+
+	peerKey, err := curve.NewPublicKey(peerKeyBytes)
+	if err != nil {
+		return fmt.Errorf("session: parse peer key: %w", err)
+	}
+
+	shared, err := ourKey.ECDH(peerKey)
+	if err != nil {
+		return fmt.Errorf("session: derive shared secret: %w", err)
+	}
+
+	hash := sha256.Sum256(shared)
+
+	s.mu.Lock()
+	s.sessionKey = hash[:]
+	s.peerPubKey = reply.PubKey
+	s.peerStaticPubKey = reply.StaticPubKey
+	s.peerName = reply.ClientName
+	s.mu.Unlock()
+
+	s.log.DebugContext(ctx, "session key established",
 		"remote", s.conn.RemoteAddr(),
 		"peer_name", s.peerName,
 		"peer_pub_key", s.peerPubKey,
@@ -218,9 +304,34 @@ func (s *Session) Decrypt(data []byte) ([]byte, error) {
 	return plain, nil
 }
 
+func (s *Session) Send(plain []byte) error {
+	enc, err := s.Encrypt(plain)
+	if err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.conn == nil {
+		return errors.New("session: connection closed")
+	}
+
+	if err = s.conn.SetWriteDeadline(time.Now().Add(s.timeout)); err != nil {
+		return fmt.Errorf("session: set write deadline: %w", err)
+	}
+	if err = s.conn.WriteMessage(websocket.TextMessage, enc); err != nil {
+		return fmt.Errorf("session: write: %w", err)
+	}
+	return nil
+}
+
 func (s *Session) PeerPubKey() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	if s.peerStaticPubKey != "" {
+		return s.peerStaticPubKey
+	}
 	return s.peerPubKey
 }
 
@@ -228,6 +339,18 @@ func (s *Session) PeerName() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.peerName
+}
+
+func (s *Session) Status() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.status
+}
+
+func (s *Session) SetStatus(status string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.status = status
 }
 
 func (s *Session) Close() error {
