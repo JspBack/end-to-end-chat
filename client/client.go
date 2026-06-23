@@ -62,23 +62,23 @@ func (c *Client) AddKnownPeer(peer *store.KnownPeer) error {
 	return nil
 }
 
-func (c *Client) GetKnownPeer(peerIP string) (*store.KnownPeer, error) {
-	peer, err := c.Store.KnownPeers.Get(peerIP)
+func (c *Client) GetKnownPeer(pubKey string) (*store.KnownPeer, error) {
+	peer, err := c.Store.KnownPeers.Get(pubKey)
 	if err != nil {
 		return nil, fmt.Errorf("client: get known peer: %w", err)
 	}
 	return peer, nil
 }
 
-func (c *Client) RemoveKnownPeer(peerIP string) error {
-	if err := c.Store.KnownPeers.Remove(peerIP); err != nil {
+func (c *Client) RemoveKnownPeer(pubKey string) error {
+	if err := c.Store.KnownPeers.Remove(pubKey); err != nil {
 		return fmt.Errorf("client: remove known peer: %w", err)
 	}
 	return nil
 }
 
 func (c *Client) SetPeerStatus(pubKey, status string) (*store.KnownPeer, error) {
-	peer, err := c.Store.KnownPeers.GetByPubKey(pubKey)
+	peer, err := c.Store.KnownPeers.Get(pubKey)
 	if err != nil {
 		return nil, fmt.Errorf("client: get peer: %w", err)
 	}

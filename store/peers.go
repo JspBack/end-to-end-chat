@@ -25,17 +25,17 @@ type KnownPeerStore struct {
 }
 
 func (k *KnownPeerStore) Add(peer *KnownPeer) error {
-	q := "INSERT OR REPLACE INTO known_peers (peer_ip, pub_key, status) VALUES (?, ?, ?)"
-	if _, err := k.db.ExecContext(context.Background(), q, peer.PeerIP, peer.PubKey, peer.Status); err != nil {
+	q := "INSERT OR REPLACE INTO known_peers (pub_key, peer_ip, status) VALUES (?, ?, ?)"
+	if _, err := k.db.ExecContext(context.Background(), q, peer.PubKey, peer.PeerIP, peer.Status); err != nil {
 		return fmt.Errorf("store: add known peer: %w", err)
 	}
 	return nil
 }
 
-func (k *KnownPeerStore) Get(peerIP string) (*KnownPeer, error) {
+func (k *KnownPeerStore) Get(pubKey string) (*KnownPeer, error) {
 	var peer KnownPeer
-	q := "SELECT peer_ip, pub_key, status FROM known_peers WHERE peer_ip = ?"
-	if err := k.db.QueryRowContext(context.Background(), q, peerIP).Scan(&peer.PeerIP, &peer.PubKey, &peer.Status); err != nil {
+	q := "SELECT pub_key, peer_ip, status FROM known_peers WHERE pub_key = ?"
+	if err := k.db.QueryRowContext(context.Background(), q, pubKey).Scan(&peer.PubKey, &peer.PeerIP, &peer.Status); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, os.ErrNotExist
 		}
@@ -44,20 +44,8 @@ func (k *KnownPeerStore) Get(peerIP string) (*KnownPeer, error) {
 	return &peer, nil
 }
 
-func (k *KnownPeerStore) GetByPubKey(pubKey string) (*KnownPeer, error) {
-	var peer KnownPeer
-	q := "SELECT peer_ip, pub_key, status FROM known_peers WHERE pub_key = ?"
-	if err := k.db.QueryRowContext(context.Background(), q, pubKey).Scan(&peer.PeerIP, &peer.PubKey, &peer.Status); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, os.ErrNotExist
-		}
-		return nil, fmt.Errorf("store: get known peer by pub_key: %w", err)
-	}
-	return &peer, nil
-}
-
 func (k *KnownPeerStore) List() ([]KnownPeer, error) {
-	q := "SELECT peer_ip, pub_key, status FROM known_peers"
+	q := "SELECT pub_key, peer_ip, status FROM known_peers"
 	rows, err := k.db.QueryContext(context.Background(), q)
 	if err != nil {
 		return nil, fmt.Errorf("store: list known peers: %w", err)
@@ -67,7 +55,7 @@ func (k *KnownPeerStore) List() ([]KnownPeer, error) {
 	var peers []KnownPeer
 	for rows.Next() {
 		var peer KnownPeer
-		if err = rows.Scan(&peer.PeerIP, &peer.PubKey, &peer.Status); err != nil {
+		if err = rows.Scan(&peer.PubKey, &peer.PeerIP, &peer.Status); err != nil {
 			return nil, fmt.Errorf("store: scan peer: %w", err)
 		}
 		peers = append(peers, peer)
@@ -78,9 +66,9 @@ func (k *KnownPeerStore) List() ([]KnownPeer, error) {
 	return peers, nil
 }
 
-func (k *KnownPeerStore) Remove(peerIP string) error {
-	q := "DELETE FROM known_peers WHERE peer_ip = ?"
-	if _, err := k.db.ExecContext(context.Background(), q, peerIP); err != nil {
+func (k *KnownPeerStore) Remove(pubKey string) error {
+	q := "DELETE FROM known_peers WHERE pub_key = ?"
+	if _, err := k.db.ExecContext(context.Background(), q, pubKey); err != nil {
 		return fmt.Errorf("store: remove known peer: %w", err)
 	}
 	return nil

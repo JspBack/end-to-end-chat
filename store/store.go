@@ -34,7 +34,7 @@ func New(dir string) *Store {
 	}
 	for _, q := range []string{
 		"CREATE TABLE IF NOT EXISTS chats (id TEXT PRIMARY KEY, value TEXT)",
-		"CREATE TABLE IF NOT EXISTS known_peers (peer_ip TEXT PRIMARY KEY, pub_key TEXT, status TEXT)",
+		"CREATE TABLE IF NOT EXISTS known_peers (pub_key TEXT PRIMARY KEY, peer_ip TEXT, status TEXT)",
 	} {
 		if _, err = db.ExecContext(context.Background(), q); err != nil {
 			panic(fmt.Errorf("store: create table: %w", err))

@@ -14,7 +14,6 @@ test:
 
 clean:
 	rm -rf bin*
-	rm -rf data/
 
 pre-all:
 	pre-commit run --all-files

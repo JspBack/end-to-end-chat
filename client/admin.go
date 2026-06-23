@@ -39,7 +39,7 @@ func (c *Client) adminUpdatePeerStatus(w http.ResponseWriter, r *http.Request, s
 		return
 	}
 
-	peer, err := c.Store.KnownPeers.GetByPubKey(pubKey)
+	peer, err := c.Store.KnownPeers.Get(pubKey)
 	if err != nil {
 		http.Error(w, "peer not found\n", http.StatusNotFound)
 		return

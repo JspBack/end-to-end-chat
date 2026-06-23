@@ -27,7 +27,7 @@ func (c *Client) handleWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	peer, err := c.Store.KnownPeers.GetByPubKey(pubKey)
+	peer, err := c.Store.KnownPeers.Get(pubKey)
 	if err != nil && !os.IsNotExist(err) {
 		c.log.ErrorContext(r.Context(), "lookup peer", "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
