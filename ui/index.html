@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: system-ui, sans-serif; padding: 24px; background: #f5f7fa; color: #1a1a2e; }
+h2 { margin: 20px 0 8px; font-size: 1rem; font-weight: 600; color: #0f3460; text-transform: uppercase; letter-spacing: 0.5px; }
+pre { background: #fff; padding: 12px; border-radius: 6px; overflow-x: auto; font-size: 0.8rem; white-space: pre-wrap; margin: 8px 0; border: 1px solid #e0e0e0; }
+input { font-family: monospace; font-size: 0.8rem; padding: 8px 10px; border: 1px solid #d0d0d0; border-radius: 4px; width: 240px; margin: 2px 0; }
+input:focus { outline: none; border-color: #1976d2; }
+button { font-family: system-ui, sans-serif; font-size: 0.8rem; padding: 6px 14px; border: none; border-radius: 4px; background: #e0e0e0; cursor: pointer; transition: background 0.15s; }
+button:hover { background: #d0d0d0; }
+table { width: 100%; border-collapse: collapse; font-size: 0.8rem; margin: 8px 0; background: #fff; border-radius: 6px; overflow: hidden; border: 1px solid #e0e0e0; }
+th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid #eee; word-break: break-all; }
+th { background: #f8f9fa; font-weight: 600; color: #555; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.3px; }
+tr:last-child td { border-bottom: none; }
+tr:hover { background: #f8f9fa; }
+td button { margin: 0 2px; padding: 4px 8px; font-size: 0.75rem; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 0.7rem; font-weight: 600; }
+.badge-accepted { background: #e8f5e9; color: #2e7d32; }
+.badge-pending { background: #fff3e0; color: #f57c00; }
+.badge-rejected { background: #ffebee; color: #d32f2f; }
+.btn-primary { background: #1976d2; color: #fff; }
+.btn-primary:hover { background: #1565c0; }
+.btn-success { background: #2e7d32; color: #fff; }
+.btn-success:hover { background: #1b5e20; }
+.btn-danger { background: #d32f2f; color: #fff; }
+.btn-danger:hover { background: #b71c1c; }
+.section { padding: 16px; border-radius: 8px; margin-bottom: 12px; border: 1px solid rgba(0,0,0,0.06); }
+.section-peers { background: #e8f0fe; }
+.section-sessions { background: #f3e8fd; }
+.section-connect { background: #e8f5e9; }
+.section-send { background: #fff3e0; }
+.section-messages { background: #fce4ec; }
+</style>
+
+<pre style="background:none;border:none;padding:0;margin-bottom:12px;font-size:0.85rem;color:#888;">target: {{TARGET}}</pre>
+
+<div class="section section-peers">
+  <h2>Peers</h2>
+  <table><thead><tr><th>pubkey</th><th>addr</th><th>status</th><th></th></tr></thead><tbody id="peers"></tbody></table>
+  <button type="button" class="btn-primary" onclick="loadPeers()">refresh</button>
+</div>
+
+<div class="section section-sessions">
+  <h2>Sessions</h2>
+  <table><thead><tr><th>pubkey</th><th>name</th><th>status</th></tr></thead><tbody id="sessions"></tbody></table>
+  <button type="button" class="btn-primary" onclick="loadSessions()">refresh</button>
+</div>
+
+<div class="section section-connect">
+  <h2>Connect</h2>
+  <input id="connect-addr" placeholder="host:port">
+  <button type="button" class="btn-primary" onclick="connectPeer()">connect</button>
+  <pre id="connect-result"></pre>
+</div>
+
+<div class="section section-send">
+  <h2>Send</h2>
+  <input id="send-pubkey" placeholder="peer pubkey">
+  <input id="send-content" placeholder="message">
+  <button type="button" class="btn-primary" onclick="sendMessage()">send</button>
+  <pre id="send-result"></pre>
+</div>
+
+<div class="section section-messages">
+  <h2>Messages</h2>
+  <table><thead><tr><th>id</th><th>created</th><th></th></tr></thead><tbody id="messages"></tbody></table>
+  <button type="button" class="btn-primary" onclick="loadMessages()">refresh</button>
+  <pre id="message-detail"></pre>
+</div>
+
+<script>
+async function api(path, opts) {
+  const res = await fetch(path, { ...opts, headers: { 'Content-Type': 'application/json' } });
+  const text = await res.text();
+  if (!res.ok) throw new Error(text.trim());
+  try { return JSON.parse(text); } catch { return text; }
+}
+
+async function loadPeers() {
+  const data = await api('/admin/peers') || [];
+  document.getElementById('peers').innerHTML = data.map(p => `<tr>
+    <td>${p.pub_key}</td><td>${p.peer_ip}</td><td><span class="badge badge-${p.status}">${p.status}</span></td>
+    <td>
+      <button type="button" class="btn-success" onclick="updatePeer('${p.pub_key}','accept')">accept</button>
+      <button type="button" class="btn-danger" onclick="updatePeer('${p.pub_key}','reject')">reject</button>
+    </td>
+  </tr>`).join('');
+}
+async function updatePeer(pk, action) {
+  await api(`/admin/peers/${pk}/${action}`, { method: 'PUT' });
+  loadPeers(); loadSessions();
+}
+async function loadSessions() {
+  const data = await api('/admin/sessions') || [];
+  document.getElementById('sessions').innerHTML = data.map(s => `<tr>
+    <td>${s.pub_key}</td><td>${s.name || '-'}</td><td><span class="badge badge-${s.status}">${s.status}</span></td>
+  </tr>`).join('');
+}
+async function loadMessages() {
+  const data = await api('/api/messages') || [];
+  document.getElementById('messages').innerHTML = data.map(m => `<tr>
+    <td>${m.id}</td><td>${m.created_at}</td>
+    <td><button type="button" class="btn-primary" onclick="viewMessage('${m.id}')">view</button></td>
+  </tr>`).join('');
+  document.getElementById('message-detail').textContent = '';
+}
+async function viewMessage(id) {
+  const msg = await api(`/api/messages/${id}`);
+  document.getElementById('message-detail').textContent = JSON.stringify(msg, null, 2);
+}
+async function connectPeer() {
+  const addr = document.getElementById('connect-addr').value;
+  if (!addr) return;
+  try {
+    const r = await api('/api/peers/connect', { method: 'POST', body: JSON.stringify({ addr }) });
+    document.getElementById('connect-result').textContent = JSON.stringify(r);
+    setTimeout(loadPeers, 500);
+  } catch (e) { document.getElementById('connect-result').textContent = 'error: ' + e.message; }
+}
+async function sendMessage() {
+  const pk = document.getElementById('send-pubkey').value;
+  const msg = document.getElementById('send-content').value;
+  if (!pk || !msg) return;
+  try {
+    const r = await api(`/api/messages/${pk}`, { method: 'POST', body: JSON.stringify({ content: msg }) });
+    document.getElementById('send-result').textContent = JSON.stringify(r);
+    document.getElementById('send-content').value = '';
+    loadMessages();
+  } catch (e) { document.getElementById('send-result').textContent = 'error: ' + e.message; }
+}
+window.updatePeer = updatePeer;
+window.connectPeer = connectPeer;
+window.sendMessage = sendMessage;
+window.viewMessage = viewMessage;
+loadPeers(); loadSessions(); loadMessages();
+setInterval(loadPeers, 1000);
+setInterval(loadSessions, 1000);
+setInterval(loadMessages, 1000);
+</script>

@@ -34,7 +34,6 @@ func (c *Client) registerAdminRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /admin/peers", c.localhostOnly(c.adminListPeers))
 	mux.HandleFunc("PUT /admin/peers/{pubKey}/accept", c.localhostOnly(c.adminAcceptPeer))
 	mux.HandleFunc("PUT /admin/peers/{pubKey}/reject", c.localhostOnly(c.adminRejectPeer))
-	mux.HandleFunc("PUT /admin/peers/{pubKey}/pending", c.localhostOnly(c.adminPendingPeer))
 	mux.HandleFunc("GET /admin/sessions", c.localhostOnly(c.adminListSessions))
 	mux.HandleFunc("POST /api/peers/connect", c.localhostOnly(c.apiConnectPeer))
 	mux.HandleFunc("POST /api/messages/{pubKey}", c.localhostOnly(c.apiSendMessage))
@@ -108,13 +107,6 @@ func (c *Client) adminRejectPeer(w http.ResponseWriter, r *http.Request) {
 	c.log.InfoContext(r.Context(), "peer rejected and closed", "pub_key", pubKey)
 }
 
-func (c *Client) adminPendingPeer(w http.ResponseWriter, r *http.Request) {
-	pubKey := r.PathValue("pubKey")
-	c.adminUpdatePeerStatus(w, r, store.PeerStatusPending)
-	c.updateSessionStatus(pubKey, store.PeerStatusPending)
-	c.log.InfoContext(r.Context(), "peer moved to pending", "pub_key", pubKey)
-}
-
 func (c *Client) apiSendMessage(w http.ResponseWriter, r *http.Request) {
 	pubKey := r.PathValue("pubKey")
 	if pubKey == "" {
@@ -163,7 +155,7 @@ func (c *Client) adminListSessions(w http.ResponseWriter, _ *http.Request) {
 		Status string `json:"status"`
 		Name   string `json:"name"`
 	}
-	var out []sessionInfo
+	out := make([]sessionInfo, 0)
 	c.sessions.Range(func(key, value interface{}) bool {
 		sess, ok := value.(*Session)
 		if !ok {
