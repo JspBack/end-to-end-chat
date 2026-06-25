@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 type Keys struct {
@@ -25,35 +26,59 @@ func generateRandomSeed() []byte {
 	return seed
 }
 
-func Load(keyFile string) *Keys {
+func keysDir() string {
 	exe, err := os.Executable()
 	if err != nil {
 		panic(fmt.Errorf("keys: get executable path: %w", err))
 	}
-	keyFile = filepath.Join(filepath.Dir(exe), keyFile)
+	return filepath.Dir(exe)
+}
 
-	seed, err := os.ReadFile(keyFile)
+func findExistingKey(dir string) string {
+	entries, err := os.ReadDir(dir)
 	if err != nil {
-		if err = os.MkdirAll(filepath.Dir(keyFile), 0755); err != nil {
-			panic(fmt.Errorf("keys: create directory: %w", err))
-		}
-		seed = generateRandomSeed()
-		if err = os.WriteFile(keyFile, seed, 0600); err != nil {
-			panic(fmt.Errorf("keys: write key file: %w", err))
+		return ""
+	}
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasPrefix(e.Name(), ".") && strings.HasSuffix(e.Name(), "_key") {
+			return filepath.Join(dir, e.Name())
 		}
 	}
-	if len(seed) != ed25519.SeedSize {
-		panic(fmt.Errorf("keys: seed file has unexpected length %d (want %d)", len(seed), ed25519.SeedSize))
+	return ""
+}
+
+func AutoLoad() *Keys {
+	dir := keysDir()
+
+	if path := findExistingKey(dir); path != "" {
+		seed, err := os.ReadFile(path)
+		if err == nil && len(seed) == ed25519.SeedSize {
+			priv := ed25519.NewKeyFromSeed(seed)
+			pub, _ := priv.Public().(ed25519.PublicKey)
+			return &Keys{
+				Private: hex.EncodeToString(seed),
+				Public:  hex.EncodeToString(pub),
+				sign:    priv,
+			}
+		}
 	}
 
+	seed := generateRandomSeed()
 	priv := ed25519.NewKeyFromSeed(seed)
 	pub, _ := priv.Public().(ed25519.PublicKey)
 
-	return &Keys{
+	k := &Keys{
 		Private: hex.EncodeToString(seed),
 		Public:  hex.EncodeToString(pub),
 		sign:    priv,
 	}
+
+	keyFile := filepath.Join(dir, "."+k.Derive()+"_key")
+	if err := os.WriteFile(keyFile, seed, 0600); err != nil {
+		panic(fmt.Errorf("keys: write key file: %w", err))
+	}
+
+	return k
 }
 
 func (k *Keys) Sign(msg []byte) []byte {
@@ -70,5 +95,5 @@ func Verify(pubKeyHex string, msg, sig []byte) bool {
 
 func (k *Keys) Derive() string {
 	h := sha256.Sum256([]byte(k.Private))
-	return hex.EncodeToString(h[:])
+	return hex.EncodeToString(h[:8])
 }

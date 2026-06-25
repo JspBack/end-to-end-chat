@@ -15,7 +15,6 @@ const maxNameLen = 64
 
 const (
 	DefaultClientName       = "default"
-	DefaultKeyFile          = ".generated_key"
 	DefaultPort             = 8080
 	DefaultTimeout          = 15 * time.Second
 	DefaultRateLimit        = 100
@@ -26,7 +25,6 @@ const (
 
 type Config struct {
 	ClientName     string
-	KeyFile        string
 	LogLevel       slog.Level
 	Port           int
 	Timeout        time.Duration
@@ -62,7 +60,6 @@ func Parse() *Config {
 	c := &Config{}
 	fs := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
 	fs.StringVar(&c.ClientName, "client", DefaultClientName, "client name to use")
-	fs.StringVar(&c.KeyFile, "k", DefaultKeyFile, "key file to use")
 	fs.IntVar(&c.Port, "p", DefaultPort, "port to listen on")
 	fs.DurationVar(&c.Timeout, "t", DefaultTimeout, "timeout for operations")
 	fs.IntVar(&c.RateLimit, "rate-limit", DefaultRateLimit, "HTTP requests per window per IP")

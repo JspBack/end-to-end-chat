@@ -2,18 +2,13 @@ package test_test
 
 import (
 	"encoding/hex"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/JspBack/end-to-end-chat/keys"
 )
 
-func TestKeysGenerateAndSign(t *testing.T) {
-	dir := t.TempDir()
-	keyFile := filepath.Join(dir, "test_key")
-	k := keys.Load(keyFile)
-	defer os.Remove(keyFile)
+func TestAutoLoadAndSign(t *testing.T) {
+	k := keys.AutoLoad()
 
 	if k.Public == "" {
 		t.Error("Public key is empty")
@@ -31,10 +26,8 @@ func TestKeysGenerateAndSign(t *testing.T) {
 	}
 }
 
-func TestSignAndVerify(t *testing.T) {
-	dir := t.TempDir()
-	k := keys.Load(filepath.Join(dir, "key_sv"))
-	defer os.Remove(filepath.Join(dir, "key_sv"))
+func TestAutoLoadSignAndVerify(t *testing.T) {
+	k := keys.AutoLoad()
 
 	msg := []byte("hello world")
 	sig := k.Sign(msg)
@@ -44,10 +37,8 @@ func TestSignAndVerify(t *testing.T) {
 	}
 }
 
-func TestVerifyWrongMessage(t *testing.T) {
-	dir := t.TempDir()
-	k := keys.Load(filepath.Join(dir, "key_wm"))
-	defer os.Remove(filepath.Join(dir, "key_wm"))
+func TestAutoLoadVerifyWrongMessage(t *testing.T) {
+	k := keys.AutoLoad()
 
 	sig := k.Sign([]byte("message"))
 	if keys.Verify(k.Public, []byte("wrong message"), sig) {
@@ -55,7 +46,7 @@ func TestVerifyWrongMessage(t *testing.T) {
 	}
 }
 
-func TestVerifyBadPubKey(t *testing.T) {
+func TestAutoLoadVerifyBadPubKey(t *testing.T) {
 	if keys.Verify("nothex", []byte("msg"), []byte("sig")) {
 		t.Error("Verify should return false for invalid hex key")
 	}
@@ -64,27 +55,22 @@ func TestVerifyBadPubKey(t *testing.T) {
 	}
 }
 
-func TestDerive(t *testing.T) {
-	dir := t.TempDir()
-	k := keys.Load(filepath.Join(dir, "key_der"))
-	defer os.Remove(filepath.Join(dir, "key_der"))
+func TestAutoLoadDerive(t *testing.T) {
+	k := keys.AutoLoad()
 
 	d1 := k.Derive()
 	d2 := k.Derive()
 	if d1 != d2 {
 		t.Error("Derive should be deterministic")
 	}
-	if len(d1) != 64 {
-		t.Errorf("Derive length = %d, want 64 (SHA-256 hex)", len(d1))
+	if len(d1) != 16 {
+		t.Errorf("Derive length = %d, want 16 (truncated SHA-256 hex)", len(d1))
 	}
 }
 
-func TestKeyPersistence(t *testing.T) {
-	dir := t.TempDir()
-	keyFile := filepath.Join(dir, "persist_key")
-
-	k1 := keys.Load(keyFile)
-	k2 := keys.Load(keyFile)
+func TestAutoLoadKeyPersistence(t *testing.T) {
+	k1 := keys.AutoLoad()
+	k2 := keys.AutoLoad()
 
 	if k1.Public != k2.Public {
 		t.Error("Public keys should match after reload")
@@ -102,9 +88,8 @@ func TestKeyPersistence(t *testing.T) {
 	}
 }
 
-func TestSignEmptyMessage(t *testing.T) {
-	dir := t.TempDir()
-	k := keys.Load(filepath.Join(dir, "key_emptymsgsig"))
+func TestAutoLoadSignEmptyMessage(t *testing.T) {
+	k := keys.AutoLoad()
 
 	sig := k.Sign([]byte{})
 	if !keys.Verify(k.Public, []byte{}, sig) {
@@ -112,9 +97,8 @@ func TestSignEmptyMessage(t *testing.T) {
 	}
 }
 
-func TestSignNilMessage(t *testing.T) {
-	dir := t.TempDir()
-	k := keys.Load(filepath.Join(dir, "key_nilmsgsig"))
+func TestAutoLoadSignNilMessage(t *testing.T) {
+	k := keys.AutoLoad()
 
 	sig := k.Sign(nil)
 	if !keys.Verify(k.Public, nil, sig) {
@@ -122,27 +106,24 @@ func TestSignNilMessage(t *testing.T) {
 	}
 }
 
-func TestVerifyNilSignature(t *testing.T) {
-	dir := t.TempDir()
-	k := keys.Load(filepath.Join(dir, "key_nilsig"))
+func TestAutoLoadVerifyNilSignature(t *testing.T) {
+	k := keys.AutoLoad()
 
 	if keys.Verify(k.Public, []byte("msg"), nil) {
 		t.Error("Verify should return false for nil signature")
 	}
 }
 
-func TestVerifyEmptySignature(t *testing.T) {
-	dir := t.TempDir()
-	k := keys.Load(filepath.Join(dir, "key_emptysig"))
+func TestAutoLoadVerifyEmptySignature(t *testing.T) {
+	k := keys.AutoLoad()
 
 	if keys.Verify(k.Public, []byte("msg"), []byte{}) {
 		t.Error("Verify should return false for empty signature")
 	}
 }
 
-func TestVerifyTamperedSignature(t *testing.T) {
-	dir := t.TempDir()
-	k := keys.Load(filepath.Join(dir, "key_tampersig"))
+func TestAutoLoadVerifyTamperedSignature(t *testing.T) {
+	k := keys.AutoLoad()
 
 	msg := []byte("hello")
 	sig := k.Sign(msg)
@@ -150,24 +131,5 @@ func TestVerifyTamperedSignature(t *testing.T) {
 
 	if keys.Verify(k.Public, msg, sig) {
 		t.Error("Verify should return false for tampered signature")
-	}
-}
-
-func TestKeysDeterministicFromSeed(t *testing.T) {
-	dir := t.TempDir()
-	kf := filepath.Join(dir, "k_det")
-
-	k1 := keys.Load(kf)
-
-	pub1 := k1.Public
-	priv1 := k1.Private
-
-	k2 := keys.Load(kf)
-
-	if k2.Public != pub1 {
-		t.Error("public key should be deterministic from same seed file")
-	}
-	if k2.Private != priv1 {
-		t.Error("private key (seed) should be deterministic from same seed file")
 	}
 }
