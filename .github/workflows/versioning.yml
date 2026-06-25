@@ -15,6 +15,11 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.26.2"
+
       - name: bump and tag
         run: |
           git config user.name "github-actions"
@@ -22,3 +27,12 @@ jobs:
           LATEST=$(git tag --list 'v*' --sort=-v:refname | head -1)
           NEW=v$(echo "$LATEST" | cut -d. -f1 | tr -d v).$(echo "$LATEST" | cut -d. -f2).$(($(echo "$LATEST" | cut -d. -f3)+1))
           git tag "$NEW" && git push --tags
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
