@@ -4,11 +4,9 @@ import (
 	"embed"
 	"flag"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 )
@@ -21,19 +19,15 @@ func main() {
 	targetAddr := flag.String("target", "localhost:8080", "Chat API address (host:port)")
 	flag.Parse()
 
-	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
-
 	raw, err := content.ReadFile("index.html")
 	if err != nil {
-		logger.Error("read embedded file", "error", err)
-		os.Exit(1)
+		panic(err)
 	}
 	page := strings.ReplaceAll(string(raw), "{{TARGET}}", *targetAddr)
 
 	targetURL, err := url.Parse(fmt.Sprintf("http://%s", *targetAddr))
 	if err != nil {
-		logger.Error("invalid target address", "error", err)
-		os.Exit(1)
+		panic(err)
 	}
 	proxy := httputil.NewSingleHostReverseProxy(targetURL)
 
@@ -50,14 +44,9 @@ func main() {
 	mux.Handle("/admin/", proxy)
 
 	addr := fmt.Sprintf(":%d", *port)
-	srv := &http.Server{
-		Addr:              addr,
-		Handler:           mux,
-		ReadHeaderTimeout: 10 * time.Second,
-	}
-	logger.Info("ui dashboard", "addr", fmt.Sprintf("http://localhost%s", addr), "target", *targetAddr)
-	if serveErr := srv.ListenAndServe(); serveErr != nil {
-		logger.Error("listen", "error", serveErr)
-		os.Exit(1)
+	fmt.Printf("ui at http://localhost%s (target %s)\n", addr, *targetAddr)
+	srv := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+	if serveErr := srv.ListenAndServe(); serveErr != nil && serveErr != http.ErrServerClosed {
+		panic(serveErr)
 	}
 }
