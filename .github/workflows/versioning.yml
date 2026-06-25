@@ -1,0 +1,34 @@
+name: versioning
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: tag next patch
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+
+          LATEST=$(git tag --list 'v*' --sort=-v:refname | head -1)
+          if [ -z "$LATEST" ]; then
+            NEW="v0.1.0"
+          else
+            MAJOR=$(echo "$LATEST" | cut -d. -f1 | tr -d v)
+            MINOR=$(echo "$LATEST" | cut -d. -f2)
+            PATCH=$(echo "$LATEST" | cut -d. -f3)
+            NEW="v$MAJOR.$MINOR.$((PATCH + 1))"
+          fi
+
+          git tag "$NEW"
+          git push --tags
