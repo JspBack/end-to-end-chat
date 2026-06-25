@@ -1,6 +1,7 @@
 # end-to-end-chat
 
-Very basic end-to-end chat implementation. :)
+Very basic end-to-end chat implementation :)
+
 On first run, the client generates a key pair (public + private). The private key is used to derive the database name and access token, so your messages persist across restarts.
 
 ## Build
@@ -56,6 +57,12 @@ Start the client in write mode to type messages from stdin:
 
 ```sh
 ./bin_client/client -w
+```
+
+Without `-addr`, write mode listens for inbound connections and broadcasts stdin to all currently connected peers. Use `-addr` to also make an outbound connection:
+
+```sh
+./bin_client/client -w -addr localhost:8080
 ```
 
 ## API
