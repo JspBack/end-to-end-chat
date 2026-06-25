@@ -5,27 +5,39 @@ On first run, the client generates a key pair (public + private). The private ke
 
 ## Build
 
-```
+```sh
 make build
 ```
 
 ## Quick start
 
-**Terminal 1 — start the client:**
+**Terminal 1 — start the peer-1:**
 
-```
-./bin_client/client
-```
-
-**Terminal 2 — start a peer that connects to the client:**
-
-```
-./bin_peer/peer -addr localhost:8080 -p 8081
+```sh
+./bin_client/client -client peer-1
 ```
 
-**Terminal 1 — accept the peer:**
+**Terminal 2 — start a peer that connects to the peer-2:**
 
+```sh
+./bin_peer/peer -p 8081 -client peer-2
 ```
+
+**Terminal 3 — start the web UI pointing at the peer-1:**
+
+```sh
+./bin_ui/ui -p 8082
+```
+
+**Terminal 4 — start the web UI pointing at the peer-2:**
+
+```sh
+./bin_ui/ui -p 8083 -t localhost:8081
+```
+
+**Or accept via curl:**
+
+```sh
 curl -X PUT localhost:8080/admin/peers/<pub_key>/accept
 ```
 
@@ -33,7 +45,7 @@ Replace `<pub_key>` with the hex key shown in the client log.
 
 Message content is logged at `debug` level. To see it in the terminal, add `-l debug`:
 
-```
+```sh
 ./bin_client/client -l debug
 ./bin_peer/peer -l debug -addr localhost:8080 -p 8081
 ```
@@ -42,7 +54,7 @@ Message content is logged at `debug` level. To see it in the terminal, add `-l d
 
 Start the client in write mode to type messages from stdin:
 
-```
+```sh
 ./bin_client/client -w
 ```
 
@@ -80,6 +92,6 @@ All API endpoints are localhost-only.
 
 ## Clean
 
-```
+```sh
 make clean
 ```

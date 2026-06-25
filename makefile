@@ -9,6 +9,7 @@ build:
 	mkdir -p bin_client bin_peer
 	go build $(LDFLAGS) -o bin_client/client ./cmd/
 	cp bin_client/client bin_peer/peer
+	go build -o bin_ui/ui ./ui/
 
 test:
 	go test ./test
