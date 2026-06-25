@@ -9,6 +9,8 @@ import (
 	"unicode"
 )
 
+var Version = "placeholder"
+
 const maxNameLen = 64
 
 const (
@@ -72,6 +74,7 @@ func Parse() *Config {
 	fs.BoolVar(&c.WriteMode, "w", false, "write mode: read stdin and broadcast messages to connected peers")
 	fs.StringVar(&c.CertFile, "cert", "", "TLS certificate file path")
 	fs.StringVar(&c.KeyFileTLS, "key", "", "TLS private key file path")
+	verInfo := fs.Bool("v", false, "show version")
 	fs.Usage = func() {
 		println("Usage:", fs.Name(), "[options]")
 		println("Options:")
@@ -80,6 +83,10 @@ func Parse() *Config {
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		fs.Usage()
 		os.Exit(1)
+	}
+	if *verInfo {
+		println(Version)
+		os.Exit(0)
 	}
 	c.ClientName = sanitizeName(c.ClientName)
 	return c

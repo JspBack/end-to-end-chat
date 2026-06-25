@@ -1,13 +1,17 @@
-.PHONY: build run test clean pre-all configure-pre-commit
+.PHONY: all build test clean pre-all configure-pre-commit
 
 all: clean test build
 
+VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+LDFLAGS := -ldflags="-s -w -X github.com/JspBack/end-to-end-chat/config.Version=$(VERSION)"
+
 build:
-	go build -ldflags="-s -w" -o bin_client/client ./cmd/
-	go build -ldflags="-s -w" -o bin_peer/peer ./cmd/
+	mkdir -p bin_client bin_peer
+	go build $(LDFLAGS) -o bin_client/client ./cmd/
+	cp bin_client/client bin_peer/peer
 
 test:
-	go test ./app_test
+	go test ./test
 
 clean:
 	rm -rf bin*
