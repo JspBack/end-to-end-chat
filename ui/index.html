@@ -102,7 +102,6 @@ async function loadMessages() {
     <td>${m.id}</td><td>${m.created_at}</td>
     <td><button type="button" class="btn-primary" onclick="viewMessage('${m.id}')">view</button></td>
   </tr>`).join('');
-  document.getElementById('message-detail').textContent = '';
 }
 async function viewMessage(id) {
   const msg = await api(`/api/messages/${id}`);
