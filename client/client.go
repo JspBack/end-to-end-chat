@@ -135,7 +135,7 @@ func (c *Client) Shutdown() {
 }
 
 func (c *Client) sendMessage(sess *Session, content string) error {
-	msg := message.Message{From: c.Name, To: sess.peerName(), Content: content}
+	msg := message.Message{From: c.Name, To: sess.peerName(), Content: content, Time: time.Now().Format(time.RFC3339)}
 
 	if _, err := message.Put(c.Store, c.Keys.Private, &msg); err != nil {
 		c.log.Warn("store message failed", "error", err)

@@ -1,20 +1,86 @@
 # end-to-end-chat
-Basic implementation of end to end encryption
 
+Very basic end-to-end chat implementation. :)
+On first run, the client generates a key pair (public + private). The private key is used to derive the database name and access token, so your messages persist across restarts.
 
-# main logic
-- first launch generates 2 keys, secret and public, public on ram secret on host. +
-- secret key stored on the host and public is shared to peer. +
-- first connection request happens if allowed, then keys exchanged. +
-- p_key saved into known_keys table and status should be accepted. (like a firewall, on application level there should be p_key cache clean option.) +
-- send messages are encrypted via public key that shared from peers then decrypted on peer. +
-- Peers are storing messages and they use secret key.+
-- Once the client shut down p_key rotates.+
-- rate limit impl for network layer +
+## Build
 
-# test-case
-- peer-1 to peer-2 +
-- peer-1 to peer-2 while peer-1 to peer-3 +
-- peer-1 to peer-2 while peer-1 to peer-3 while peer-2 to peer-3 +
+```
+make build
+```
 
-# optimizations
+## Quick start
+
+**Terminal 1 — start the client:**
+
+```
+./bin_client/client
+```
+
+**Terminal 2 — start a peer that connects to the client:**
+
+```
+./bin_peer/peer -addr localhost:8080 -p 8081
+```
+
+**Terminal 1 — accept the peer:**
+
+```
+curl -X PUT localhost:8080/admin/peers/<pub_key>/accept
+```
+
+Replace `<pub_key>` with the hex key shown in the client log.
+
+Message content is logged at `debug` level. To see it in the terminal, add `-l debug`:
+
+```
+./bin_client/client -l debug
+./bin_peer/peer -l debug -addr localhost:8080 -p 8081
+```
+
+## Write mode
+
+Start the client in write mode to type messages from stdin:
+
+```
+./bin_client/client -w
+```
+
+## API
+
+| Endpoint | Description |
+|---|---|
+| `GET /api/messages` | List all messages (id + timestamp) |
+| `GET /api/messages/{id}` | Get a single message |
+| `POST /api/messages/{pubKey}` | Send a message to a connected peer |
+| `POST /api/peers/connect` | Connect to a peer (`{"addr":"host:port"}`) |
+| `GET /admin/peers` | List peers |
+| `PUT /admin/peers/{pubKey}/accept` | Accept peer |
+| `PUT /admin/peers/{pubKey}/reject` | Reject peer |
+| `GET /admin/sessions` | List active sessions |
+
+All API endpoints are localhost-only.
+
+## Flags
+
+| Flag | Default | Description |
+|---|---|---|
+| `-client` | `default` | Client name |
+| `-p` | `8080` | Port to listen on |
+| `-addr` | `""` | Peer address to connect to (`host:port`) |
+| `-w` | `false` | Read stdin and broadcast to connected peers |
+| `-k` | `.generated_key` | Key file path |
+| `-l` | `info` | Log level (`debug`, `info`, `warn`, `error`) |
+| `-t` | `15s` | Timeout for operations |
+| `-rate-limit` | `100` | HTTP requests per window per IP |
+| `-rate-window` | `1m` | Rate limiter window duration |
+| `-max-msg-size` | `1MB` | Maximum message size in bytes |
+| `-ping-window` | `5s` | Ping window duration |
+| `-cert` | `""` | TLS certificate file path |
+| `-key` | `""` | TLS private key file path |
+
+## Clean
+
+```
+make clean
+```

@@ -1,16 +1,13 @@
 .PHONY: build run test clean pre-all configure-pre-commit
 
-all: clean test build run
+all: clean test build
 
 build:
 	go build -ldflags="-s -w" -o bin_client/client ./cmd/
 	go build -ldflags="-s -w" -o bin_peer/peer ./cmd/
 
-run:
-	./bin_client/client
-
 test:
-	go test ./test
+	go test ./app_test
 
 clean:
 	rm -rf bin*

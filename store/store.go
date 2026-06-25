@@ -38,13 +38,14 @@ func New(dir string) *Store {
 		"PRAGMA journal_mode=WAL",
 		"PRAGMA busy_timeout=5000",
 
-		"CREATE TABLE IF NOT EXISTS chats (id TEXT PRIMARY KEY, value TEXT)",
+		"CREATE TABLE IF NOT EXISTS chats (id TEXT PRIMARY KEY, value TEXT, created_at TEXT)",
 		"CREATE TABLE IF NOT EXISTS known_peers (pub_key TEXT PRIMARY KEY, peer_ip TEXT, status TEXT)",
 	} {
 		if _, err = db.ExecContext(context.Background(), q); err != nil {
 			panic(fmt.Errorf("store: create table: %w", err))
 		}
 	}
+
 	return &Store{
 		Chats:      &ChatStore{db: db},
 		KnownPeers: &KnownPeerStore{db: db},

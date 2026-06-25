@@ -218,16 +218,16 @@ func (c *Client) apiConnectPeer(w http.ResponseWriter, r *http.Request) {
 }
 
 func (c *Client) apiListMessages(w http.ResponseWriter, _ *http.Request) {
-	ids, err := c.Store.Chats.List()
+	summaries, err := c.Store.Chats.List()
 	if err != nil {
 		http.Error(w, err.Error()+"\n", http.StatusInternalServerError)
 		return
 	}
-	if ids == nil {
-		ids = []string{}
+	if summaries == nil {
+		summaries = []store.ChatSummary{}
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(ids)
+	_ = json.NewEncoder(w).Encode(summaries)
 }
 
 func (c *Client) apiGetMessage(w http.ResponseWriter, r *http.Request) {

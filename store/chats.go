@@ -6,12 +6,18 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/google/uuid"
 )
 
 type ChatStore struct {
 	db *sql.DB
+}
+
+type ChatSummary struct {
+	ID        string `json:"id"`
+	CreatedAt string `json:"created_at"`
 }
 
 func (t *ChatStore) Put(value, secret string) (string, error) {
@@ -27,8 +33,9 @@ func (t *ChatStore) PutWithID(id, value, secret string) error {
 	if err != nil {
 		return fmt.Errorf("store: encrypt: %w", err)
 	}
-	q := "INSERT OR REPLACE INTO chats (id, value) VALUES (?, ?)"
-	if _, err = t.db.ExecContext(context.Background(), q, id, encrypted); err != nil {
+	now := time.Now().UTC().Format(time.RFC3339)
+	q := "INSERT OR REPLACE INTO chats (id, value, created_at) VALUES (?, ?, ?)"
+	if _, err = t.db.ExecContext(context.Background(), q, id, encrypted, now); err != nil {
 		return fmt.Errorf("store: put: %w", err)
 	}
 	return nil
@@ -62,26 +69,26 @@ func (t *ChatStore) Update(id, value, secret string) error {
 	return t.PutWithID(id, value, secret)
 }
 
-func (t *ChatStore) List() ([]string, error) {
-	q := "SELECT id FROM chats ORDER BY rowid"
+func (t *ChatStore) List() ([]ChatSummary, error) {
+	q := "SELECT id, COALESCE(created_at, '') FROM chats ORDER BY rowid"
 	rows, err := t.db.QueryContext(context.Background(), q)
 	if err != nil {
 		return nil, fmt.Errorf("store: list: %w", err)
 	}
 	defer rows.Close()
 
-	var ids []string
+	var out []ChatSummary
 	for rows.Next() {
-		var id string
-		if err = rows.Scan(&id); err != nil {
+		var s ChatSummary
+		if err = rows.Scan(&s.ID, &s.CreatedAt); err != nil {
 			return nil, fmt.Errorf("store: scan: %w", err)
 		}
-		ids = append(ids, id)
+		out = append(out, s)
 	}
 	if err = rows.Err(); err != nil {
 		return nil, fmt.Errorf("store: list rows: %w", err)
 	}
-	return ids, nil
+	return out, nil
 }
 
 func (t *ChatStore) Delete(id string) error {

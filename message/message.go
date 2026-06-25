@@ -3,6 +3,7 @@ package message
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/JspBack/end-to-end-chat/store"
 )
@@ -11,10 +12,11 @@ type Message struct {
 	From    string `json:"from"`
 	To      string `json:"to"`
 	Content string `json:"content"`
+	Time    string `json:"time"`
 }
 
 func NewMessage(from, to, content string) *Message {
-	return &Message{From: from, To: to, Content: content}
+	return &Message{From: from, To: to, Content: content, Time: time.Now().Format(time.RFC3339)}
 }
 
 func (m *Message) Encode() ([]byte, error) {
