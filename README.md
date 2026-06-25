@@ -97,6 +97,20 @@ All API endpoints are localhost-only.
 | `-cert` | `""` | TLS certificate file path |
 | `-key` | `""` | TLS private key file path |
 
+## Network limitations
+
+This project does not use a relay server, STUN/TURN, or any type of middle connection. Peers connect directly to each other using raw TCP over the internet.
+
+Because of this, peer-to-peer communication will not work across many real-world network configurations:
+
+- **NAT** – Most home/office routers hide devices behind a single public IP. Direct inbound connections are blocked unless port forwarding is configured.
+- **CGNAT** – Mobile and some residential ISPs place customers behind shared IPs, making port forwarding impossible.
+- **Firewalls** – Many networks block unsolicited inbound traffic on non-standard ports.
+
+### Workaround
+
+You can bridge peers across the internet by using a virtual private network that gives each device a routable LAN address. One popular option is [ZeroTier](https://github.com/zerotier/zerotierone): it creates a secure software-defined network so peers appear to be on the same local subnet even when they are behind NAT or CGNAT.
+
 ## Clean
 
 ```sh
