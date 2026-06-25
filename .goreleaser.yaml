@@ -1,0 +1,9 @@
+builds:
+  - main: ./cmd/
+    binary: client
+    ldflags:
+      - -s -w -X github.com/JspBack/end-to-end-chat/config.Version={{ .Version }}
+    goos:
+      - linux
+      - darwin
+      - windows
