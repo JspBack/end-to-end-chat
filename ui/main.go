@@ -15,8 +15,8 @@ import (
 var content embed.FS
 
 func main() {
-	port := flag.Int("port", 8088, "UI server port")
-	targetAddr := flag.String("target", "localhost:8080", "Chat API address (host:port)")
+	port := flag.Int("p", 8088, "UI server port")
+	targetAddr := flag.String("t", "localhost:8080", "Chat API address (host:port)")
 	flag.Parse()
 
 	raw, err := content.ReadFile("index.html")
