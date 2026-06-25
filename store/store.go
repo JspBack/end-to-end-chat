@@ -14,7 +14,7 @@ import (
 	"path/filepath"
 
 	// sqLite driver.
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 )
 
 type Store struct {
@@ -28,7 +28,7 @@ func New(dir string) *Store {
 		panic(fmt.Errorf("store: get executable path: %w", err))
 	}
 	dbPath := filepath.Join(filepath.Dir(exe), dir+".db")
-	db, err := sql.Open("sqlite3", dbPath)
+	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		panic(fmt.Errorf("store: open database: %w", err))
 	}
