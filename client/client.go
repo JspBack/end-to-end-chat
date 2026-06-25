@@ -41,19 +41,20 @@ type Client struct {
 	writeMode bool
 }
 
-func New(cfg config.Config, logger *slog.Logger) *Client {
-	k := keys.Load(cfg.KeyFile)
-
-	var tlsConfig *tls.Config
-	if cfg.UseTLS() {
-		cert, err := tls.LoadX509KeyPair(cfg.CertFile, cfg.KeyFileTLS)
-		if err != nil {
-			logger.Error("load TLS cert", "error", err)
-			os.Exit(1)
-		}
-		tlsConfig = &tls.Config{Certificates: []tls.Certificate{cert}}
+func loadTLSConfig(cfg config.Config, logger *slog.Logger) *tls.Config {
+	if !cfg.UseTLS() {
+		return nil
 	}
+	cert, err := tls.LoadX509KeyPair(cfg.CertFile, cfg.KeyFileTLS)
+	if err != nil {
+		logger.Error("load TLS cert", "error", err)
+		os.Exit(1)
+	}
+	return &tls.Config{Certificates: []tls.Certificate{cert}}
+}
 
+func New(cfg config.Config, logger *slog.Logger) *Client {
+	k := keys.AutoLoad()
 	return &Client{
 		Name:           cfg.ClientName,
 		Keys:           k,
@@ -65,7 +66,7 @@ func New(cfg config.Config, logger *slog.Logger) *Client {
 		RateWindow:     cfg.RateWindow,
 		MaxMessageSize: cfg.MaxMessageSize,
 		pingPeriod:     cfg.PingWindow,
-		tlsConfig:      tlsConfig,
+		tlsConfig:      loadTLSConfig(cfg, logger),
 		certFile:       cfg.CertFile,
 		keyFileTLS:     cfg.KeyFileTLS,
 		peerAddr:       cfg.PeerAddr,

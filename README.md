@@ -69,7 +69,6 @@ All API endpoints are localhost-only.
 | `-p` | `8080` | Port to listen on |
 | `-addr` | `""` | Peer address to connect to (`host:port`) |
 | `-w` | `false` | Read stdin and broadcast to connected peers |
-| `-k` | `.generated_key` | Key file path |
 | `-l` | `info` | Log level (`debug`, `info`, `warn`, `error`) |
 | `-t` | `15s` | Timeout for operations |
 | `-rate-limit` | `100` | HTTP requests per window per IP |
