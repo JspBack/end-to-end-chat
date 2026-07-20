@@ -8,8 +8,9 @@ builds:
       - -s -w -X github.com/JspBack/end-to-end-chat/config.Version={{ .Version }}
     goos:
       - linux
-      - darwin
       - windows
+    goarch:
+      - amd64
 
   - main: ./ui/
     id: ui
@@ -18,5 +19,6 @@ builds:
       - -s -w
     goos:
       - linux
-      - darwin
       - windows
+    goarch:
+      - amd64
