@@ -43,17 +43,14 @@ jobs:
         with:
           go-version: "1.26.2"
 
+      - name: set platform
+        run: sed -i '/- darwin/d; /- windows/d' .goreleaser.yaml
+
       - uses: goreleaser/goreleaser-action@v7
         with:
           distribution: goreleaser
           version: "~> v2"
-          args: build --single-target --clean
-
-      - name: create release
-        run: |
-          gh release create "${{ needs.tag.outputs.new-tag }}" \
-            dist/*.tar.gz dist/*.txt \
-            --generate-notes
+          args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -69,14 +66,15 @@ jobs:
         with:
           go-version: "1.26.2"
 
+      - name: set platform
+        shell: pwsh
+        run: |
+          (Get-Content .goreleaser.yaml).replace('- linux','# - linux').replace('- darwin','# - darwin') | Set-Content .goreleaser.yaml
+
       - uses: goreleaser/goreleaser-action@v7
         with:
           distribution: goreleaser
           version: "~> v2"
-          args: build --single-target --clean
-
-      - name: upload artifacts
-        run: |
-          gh release upload "${{ needs.tag.outputs.new-tag }}" dist/*.zip dist/*.txt
+          args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
