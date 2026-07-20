@@ -11,6 +11,10 @@ import (
 	"github.com/JspBack/end-to-end-chat/store"
 )
 
+type statusResponse struct {
+	Status string `json:"status"`
+}
+
 func (c *Client) localhostOnly(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		host, _, err := net.SplitHostPort(r.RemoteAddr)
@@ -39,6 +43,8 @@ func (c *Client) registerAdminRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/messages", c.localhostOnly(c.apiListMessages))
 	mux.HandleFunc("GET /api/messages/{id}", c.localhostOnly(c.apiGetMessage))
 	mux.HandleFunc("GET /api/messages/search", c.localhostOnly(c.apiSearchMessages))
+	mux.HandleFunc("PUT /api/messages/{id}", c.localhostOnly(c.apiUpdateMessage))
+	mux.HandleFunc("DELETE /api/messages/{id}", c.localhostOnly(c.apiDeleteMessage))
 }
 
 func (c *Client) adminListPeers(w http.ResponseWriter, _ *http.Request) {
@@ -151,7 +157,7 @@ func (c *Client) apiSendMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]string{"status": "sent"})
+	_ = json.NewEncoder(w).Encode(statusResponse{Status: "sent"})
 }
 
 func (c *Client) adminListSessions(w http.ResponseWriter, _ *http.Request) {
@@ -211,7 +217,7 @@ func (c *Client) apiConnectPeer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]string{"status": "connected"})
+	_ = json.NewEncoder(w).Encode(statusResponse{Status: "connected"})
 }
 
 func (c *Client) apiListMessages(w http.ResponseWriter, _ *http.Request) {
@@ -262,4 +268,75 @@ func (c *Client) apiSearchMessages(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(results)
+}
+
+func (c *Client) apiUpdateMessage(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		http.Error(w, "missing id\n", http.StatusBadRequest)
+		return
+	}
+
+	msg, err := message.Get(c.Store, c.Keys.Private, id)
+	if err != nil {
+		http.Error(w, err.Error()+"\n", http.StatusNotFound)
+		return
+	}
+
+	if msg.From != c.Name {
+		http.Error(w, "cannot edit another user's message\n", http.StatusForbidden)
+		return
+	}
+
+	var req struct {
+		Content string `json:"content"`
+	}
+	if decodeErr := json.NewDecoder(r.Body).Decode(&req); decodeErr != nil {
+		http.Error(w, "invalid body\n", http.StatusBadRequest)
+		return
+	}
+	if req.Content == "" {
+		http.Error(w, "content required\n", http.StatusBadRequest)
+		return
+	}
+
+	msg.Content = req.Content
+	if updateErr := message.Update(c.Store, c.Keys.Private, id, msg); updateErr != nil {
+		http.Error(w, updateErr.Error()+"\n", http.StatusInternalServerError)
+		return
+	}
+
+	c.broadcastUpdate(id, req.Content)
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(statusResponse{Status: "updated"})
+}
+
+func (c *Client) apiDeleteMessage(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		http.Error(w, "missing id\n", http.StatusBadRequest)
+		return
+	}
+
+	msg, err := message.Get(c.Store, c.Keys.Private, id)
+	if err != nil {
+		http.Error(w, err.Error()+"\n", http.StatusNotFound)
+		return
+	}
+
+	if msg.From != c.Name {
+		http.Error(w, "cannot delete another user's message\n", http.StatusForbidden)
+		return
+	}
+
+	if delErr := message.Delete(c.Store, id); delErr != nil {
+		http.Error(w, delErr.Error()+"\n", http.StatusInternalServerError)
+		return
+	}
+
+	c.broadcastDelete(id)
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(statusResponse{Status: "deleted"})
 }

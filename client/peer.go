@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/JspBack/end-to-end-chat/message"
+	"github.com/JspBack/end-to-end-chat/signal"
 	"github.com/JspBack/end-to-end-chat/store"
 	"github.com/gorilla/websocket"
 )
@@ -177,6 +178,21 @@ func (c *Client) peerReadLoop(sess *Session) error {
 
 		if sess.status() != store.PeerStatusAccepted {
 			continue
+		}
+
+		if sig, parseErr := signal.Parse(plain); parseErr == nil {
+			switch sig.Type {
+			case signal.TypeDelete:
+				if delErr := message.Delete(c.Store, sig.ID); delErr != nil {
+					c.log.Warn("delete message failed", "error", delErr)
+				}
+				continue
+			case signal.TypeUpdate:
+				if updErr := c.applyRemoteUpdate(sig.ID, sig.Content); updErr != nil {
+					c.log.Warn("update message failed", "error", updErr)
+				}
+				continue
+			}
 		}
 
 		msg, err := message.ToMessage(plain)

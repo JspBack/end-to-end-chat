@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"github.com/JspBack/end-to-end-chat/config"
 	"github.com/JspBack/end-to-end-chat/keys"
 	"github.com/JspBack/end-to-end-chat/message"
+	"github.com/JspBack/end-to-end-chat/signal"
 	"github.com/JspBack/end-to-end-chat/store"
 	"github.com/go-chi/httprate"
 )
@@ -154,6 +156,45 @@ func (c *Client) sendToAll(content string) {
 		if sess, ok := value.(*Session); ok {
 			if err := c.sendMessage(sess, content); err != nil {
 				c.log.Warn("send to session", "peer", sess.peerName(), "error", err)
+			}
+		}
+		return true
+	})
+}
+
+func (c *Client) broadcastDelete(id string) {
+	payload := signal.New(signal.TypeDelete, id, "")
+	c.sessions.Range(func(_, value interface{}) bool {
+		if sess, ok := value.(*Session); ok {
+			if err := sess.send(payload); err != nil {
+				c.log.Warn("broadcast delete", "peer", sess.peerName(), "error", err)
+			}
+		}
+		return true
+	})
+}
+
+func (c *Client) applyRemoteUpdate(id, content string) error {
+	if content == "" || id == "" {
+		return errors.New("update signal missing id or content")
+	}
+	msg, err := message.Get(c.Store, c.Keys.Private, id)
+	if err != nil {
+		return fmt.Errorf("get message for update: %w", err)
+	}
+	msg.Content = content
+	if err = message.Update(c.Store, c.Keys.Private, id, msg); err != nil {
+		return fmt.Errorf("remote update: %w", err)
+	}
+	return nil
+}
+
+func (c *Client) broadcastUpdate(id, content string) {
+	payload := signal.New(signal.TypeUpdate, id, content)
+	c.sessions.Range(func(_, value interface{}) bool {
+		if sess, ok := value.(*Session); ok {
+			if err := sess.send(payload); err != nil {
+				c.log.Warn("broadcast delete", "peer", sess.peerName(), "error", err)
 			}
 		}
 		return true

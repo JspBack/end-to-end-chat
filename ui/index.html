@@ -108,12 +108,34 @@ async function loadMessages() {
   const data = await api('/api/messages') || [];
   document.getElementById('messages').innerHTML = data.map(m => `<tr>
     <td>${m.id}</td><td>${m.created_at}</td>
-    <td><button type="button" class="btn-primary" onclick="viewMessage('${m.id}')">view</button></td>
+    <td>
+      <button type="button" class="btn-primary" onclick="viewMessage('${m.id}')">view</button>
+      <button type="button" class="btn-danger" onclick="deleteMessage('${m.id}')">del</button>
+    </td>
   </tr>`).join('');
 }
 async function viewMessage(id) {
   const msg = await api(`/api/messages/${id}`);
-  document.getElementById('message-detail').textContent = JSON.stringify(msg, null, 2);
+  const detail = document.getElementById('message-detail');
+  detail.innerHTML = `<pre>${JSON.stringify(msg, null, 2)}</pre>
+    <input id="edit-content" value="${escapeHtml(msg.content)}" style="width:400px">
+    <button type="button" class="btn-success" onclick="updateMessage('${id}')">update</button>`;
+}
+async function updateMessage(id) {
+  const content = document.getElementById('edit-content').value;
+  if (!content) return;
+  try {
+    const r = await api(`/api/messages/${id}`, { method: 'PUT', body: JSON.stringify({ content }) });
+    document.getElementById('message-detail').innerHTML = `<pre>${JSON.stringify(r)}</pre>`;
+    loadMessages();
+  } catch (e) { document.getElementById('message-detail').textContent = 'error: ' + e.message; }
+}
+async function deleteMessage(id) {
+  if (!confirm('delete message ' + id + '?')) return;
+  try {
+    const r = await api(`/api/messages/${id}`, { method: 'DELETE' });
+    loadMessages();
+  } catch (e) { alert(e.message); }
 }
 async function connectPeer() {
   const addr = document.getElementById('connect-addr').value;
@@ -145,11 +167,14 @@ async function searchMessages() {
       : 'no results';
   } catch (e) { document.getElementById('search-result').textContent = 'error: ' + e.message; }
 }
+function escapeHtml(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 window.updatePeer = updatePeer;
 window.connectPeer = connectPeer;
 window.sendMessage = sendMessage;
 window.viewMessage = viewMessage;
 window.searchMessages = searchMessages;
+window.updateMessage = updateMessage;
+window.deleteMessage = deleteMessage;
 loadPeers(); loadSessions(); loadMessages();
 setInterval(loadPeers, 5000);
 setInterval(loadSessions, 5000);

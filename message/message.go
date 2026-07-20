@@ -40,6 +40,7 @@ func Search(s *store.Store, secret, query string, limit int) ([]Message, error) 
 }
 
 type Message struct {
+	ID      string `json:"id,omitempty"`
 	From    string `json:"from"`
 	To      string `json:"to"`
 	Content string `json:"content"`
@@ -71,9 +72,18 @@ func Put(s *store.Store, secret string, msg *Message) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("message: marshal: %w", err)
 	}
-	id, err := s.Chats.Put(string(plain), secret)
-	if err != nil {
-		return "", fmt.Errorf("message: store put: %w", err)
+	var id string
+	if msg.ID != "" {
+		id = msg.ID
+		if err = s.Chats.PutWithID(id, string(plain), secret); err != nil {
+			return "", fmt.Errorf("message: store put: %w", err)
+		}
+	} else {
+		id, err = s.Chats.Put(string(plain), secret)
+		if err != nil {
+			return "", fmt.Errorf("message: store put: %w", err)
+		}
+		msg.ID = id
 	}
 	s.Chats.CacheStore(id, string(plain))
 	return id, nil

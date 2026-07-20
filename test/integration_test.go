@@ -217,7 +217,111 @@ func TestMessageLargeContent(t *testing.T) {
 	}
 }
 
-func TestMessageSpecialChars(t *testing.T) {
+func TestSearchBasic(t *testing.T) {
+	dir := "test_search_basic"
+	s := store.New(dir)
+	defer os.Remove(dbPath(dir))
+
+	message.Put(s, "secret", message.NewMessage("alice", "bob", "hello world"))
+	message.Put(s, "secret", message.NewMessage("bob", "alice", "how are you"))
+	message.Put(s, "secret", message.NewMessage("alice", "bob", "world of go"))
+
+	results, err := message.Search(s, "secret", "world", 10)
+	if err != nil {
+		t.Fatal("Search:", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results for 'world', got %d", len(results))
+	}
+}
+
+func TestSearchNoMatch(t *testing.T) {
+	dir := "test_search_nomatch"
+	s := store.New(dir)
+	defer os.Remove(dbPath(dir))
+
+	message.Put(s, "secret", message.NewMessage("alice", "bob", "hello"))
+
+	results, err := message.Search(s, "secret", "zzzz", 10)
+	if err != nil {
+		t.Fatal("Search:", err)
+	}
+	if len(results) != 0 {
+		t.Errorf("expected 0 results, got %d", len(results))
+	}
+}
+
+func TestSearchLimit(t *testing.T) {
+	dir := "test_search_limit"
+	s := store.New(dir)
+	defer os.Remove(dbPath(dir))
+
+	message.Put(s, "secret", message.NewMessage("a", "b", "match one"))
+	message.Put(s, "secret", message.NewMessage("c", "d", "match two"))
+
+	results, err := message.Search(s, "secret", "match", 1)
+	if err != nil {
+		t.Fatal("Search:", err)
+	}
+	if len(results) != 1 {
+		t.Errorf("expected 1 result with limit 1, got %d", len(results))
+	}
+}
+
+func TestSearchCaseInsensitive(t *testing.T) {
+	dir := "test_search_case"
+	s := store.New(dir)
+	defer os.Remove(dbPath(dir))
+
+	message.Put(s, "secret", message.NewMessage("Alice", "Bob", "HELLO World"))
+
+	results, err := message.Search(s, "secret", "hello", 10)
+	if err != nil {
+		t.Fatal("Search:", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if results[0].Content != "HELLO World" {
+		t.Errorf("Content = %q, want %q", results[0].Content, "HELLO World")
+	}
+}
+
+func TestSearchMatchesFrom(t *testing.T) {
+	dir := "test_search_from"
+	s := store.New(dir)
+	defer os.Remove(dbPath(dir))
+
+	message.Put(s, "secret", message.NewMessage("alice", "bob", "hi"))
+	message.Put(s, "secret", message.NewMessage("charlie", "bob", "hello"))
+
+	results, err := message.Search(s, "secret", "alice", 10)
+	if err != nil {
+		t.Fatal("Search:", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if results[0].From != "alice" {
+		t.Errorf("From = %q, want %q", results[0].From, "alice")
+	}
+}
+
+func TestSearchEmptyQuery(t *testing.T) {
+	dir := "test_search_emptyq"
+	s := store.New(dir)
+	defer os.Remove(dbPath(dir))
+
+	results, err := message.Search(s, "secret", "", 10)
+	if err != nil {
+		t.Fatal("Search:", err)
+	}
+	if results != nil {
+		t.Errorf("expected nil for empty query, got %v", results)
+	}
+}
+
+func TestSpecialChars(t *testing.T) {
 	dir := "test_specialchars"
 	s := store.New(dir)
 	defer os.Remove(dbPath(dir))
