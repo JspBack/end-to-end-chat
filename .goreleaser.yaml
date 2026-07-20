@@ -10,6 +10,8 @@ builds:
       - linux
       - darwin
       - windows
+    goarch:
+      - amd64
 
   - main: ./ui/
     id: ui
@@ -20,3 +22,5 @@ builds:
       - linux
       - darwin
       - windows
+    goarch:
+      - amd64
