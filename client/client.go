@@ -15,6 +15,7 @@ import (
 	"github.com/JspBack/end-to-end-chat/config"
 	"github.com/JspBack/end-to-end-chat/keys"
 	"github.com/JspBack/end-to-end-chat/message"
+	"github.com/JspBack/end-to-end-chat/signal"
 	"github.com/JspBack/end-to-end-chat/store"
 	"github.com/go-chi/httprate"
 )
@@ -142,11 +143,11 @@ func (c *Client) sendMessage(sess *Session, content string) error {
 		c.log.Warn("store message failed", "error", err)
 	}
 
-	plain, err := json.Marshal(msg)
+	payload, err := json.Marshal(msg)
 	if err != nil {
 		return fmt.Errorf("encode message: %w", err)
 	}
-	return sess.send(plain)
+	return sess.send(signal.New(signal.TypeMessage, c.Keys.Public, "", string(payload)))
 }
 
 func (c *Client) sendToAll(content string) {
@@ -154,6 +155,103 @@ func (c *Client) sendToAll(content string) {
 		if sess, ok := value.(*Session); ok {
 			if err := c.sendMessage(sess, content); err != nil {
 				c.log.Warn("send to session", "peer", sess.peerName(), "error", err)
+			}
+		}
+		return true
+	})
+}
+
+func (c *Client) broadcastDelete(id string) {
+	payload := signal.New(signal.TypeDelete, c.Keys.Public, id, "")
+	c.sessions.Range(func(_, value interface{}) bool {
+		if sess, ok := value.(*Session); ok {
+			if err := sess.send(payload); err != nil {
+				c.log.Warn("broadcast delete", "peer", sess.peerName(), "error", err)
+			}
+		}
+		return true
+	})
+}
+
+func (c *Client) handleSignal(sig *signal.Signal, sess *Session, pubKey string) {
+	switch sig.Type {
+	case signal.TypeMessage:
+		if sig.From != pubKey {
+			c.log.Warn("message signal pubkey mismatch")
+			return
+		}
+		msg, msgErr := message.ToMessage([]byte(sig.Content))
+		if msgErr != nil {
+			c.log.Warn("decode message failed", "error", msgErr)
+			return
+		}
+		if msg.From != sess.peerName() {
+			c.log.Warn("message from name mismatch")
+			return
+		}
+		if _, putErr := message.Put(c.Store, c.Keys.Private, msg); putErr != nil {
+			c.log.Warn("store message failed", "error", putErr)
+		}
+		if msg.To == c.Name {
+			c.log.Debug("message received",
+				"from", msg.From, "to", msg.To, "content", msg.Content)
+		}
+
+	case signal.TypeDelete:
+		if sig.From != pubKey {
+			c.log.Warn("delete signal pubkey mismatch")
+			return
+		}
+		if delErr := c.verifyAndDelete(sig, sess.peerName()); delErr != nil {
+			c.log.Warn("delete message failed", "error", delErr)
+		}
+
+	case signal.TypeUpdate:
+		if sig.From != pubKey {
+			c.log.Warn("update signal pubkey mismatch")
+			return
+		}
+		if updErr := c.verifyAndUpdate(sig, sess.peerName()); updErr != nil {
+			c.log.Warn("update message failed", "error", updErr)
+		}
+	}
+}
+
+func (c *Client) verifyAndDelete(sig *signal.Signal, senderName string) error {
+	msg, err := message.Get(c.Store, c.Keys.Private, sig.ID)
+	if err != nil {
+		return fmt.Errorf("get for delete: %w", err)
+	}
+	if senderName != msg.From {
+		return fmt.Errorf("sender %q does not match message from %q", senderName, msg.From)
+	}
+	if err = message.Delete(c.Store, sig.ID); err != nil {
+		return fmt.Errorf("verify delete: %w", err)
+	}
+	return nil
+}
+
+func (c *Client) verifyAndUpdate(sig *signal.Signal, senderName string) error {
+	msg, err := message.Get(c.Store, c.Keys.Private, sig.ID)
+	if err != nil {
+		return fmt.Errorf("get for update: %w", err)
+	}
+	if senderName != msg.From {
+		return fmt.Errorf("sender %q does not match message from %q", senderName, msg.From)
+	}
+	msg.Content = sig.Content
+	if err = message.Update(c.Store, c.Keys.Private, sig.ID, msg); err != nil {
+		return fmt.Errorf("verify update: %w", err)
+	}
+	return nil
+}
+
+func (c *Client) broadcastUpdate(id, content string) {
+	payload := signal.New(signal.TypeUpdate, c.Keys.Public, id, content)
+	c.sessions.Range(func(_, value interface{}) bool {
+		if sess, ok := value.(*Session); ok {
+			if err := sess.send(payload); err != nil {
+				c.log.Warn("broadcast delete", "peer", sess.peerName(), "error", err)
 			}
 		}
 		return true
@@ -176,7 +274,7 @@ func (c *Client) Listen() {
 	addr := fmt.Sprintf(":%d", c.listenPort)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/transport/", c.handleWS)
-	c.registerAdminRoutes(mux)
+	c.registerRoutes(mux)
 
 	if c.writeMode && c.peerAddr == "" {
 		go c.stdinLoop(context.Background())

@@ -10,7 +10,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/JspBack/end-to-end-chat/message"
+	"github.com/JspBack/end-to-end-chat/signal"
 	"github.com/JspBack/end-to-end-chat/store"
 	"github.com/gorilla/websocket"
 )
@@ -179,20 +179,13 @@ func (c *Client) peerReadLoop(sess *Session) error {
 			continue
 		}
 
-		msg, err := message.ToMessage(plain)
-		if err != nil {
-			c.log.Warn("decode error", "error", err)
+		sig, parseErr := signal.Parse(plain)
+		if parseErr != nil {
+			c.log.Warn("decode envelope failed", "error", parseErr)
 			continue
 		}
 
-		if _, err = message.Put(c.Store, c.Keys.Private, msg); err != nil {
-			c.log.Warn("store message failed", "error", err)
-		}
-
-		if msg.To == c.Name {
-			c.log.Debug("message received",
-				"from", msg.From, "to", msg.To, "content", msg.Content)
-		}
+		c.handleSignal(sig, sess, sess.peerPubKey())
 	}
 }
 

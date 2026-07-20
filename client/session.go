@@ -106,6 +106,9 @@ func (s *Session) verifyPeer(peer keyExchangeMsg) error {
 	if peer.StaticPubKey == "" {
 		return errors.New("session: peer sent no static public key")
 	}
+	if peer.StaticPubKey == s.ourStaticPubKey {
+		return errors.New("session: cannot connect to self")
+	}
 	sigBytes, err := base64.StdEncoding.DecodeString(peer.Signature)
 	if err != nil {
 		return fmt.Errorf("session: decode peer signature: %w", err)

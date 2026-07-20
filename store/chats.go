@@ -6,13 +6,15 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
 )
 
 type ChatStore struct {
-	db *sql.DB
+	db    *sql.DB
+	cache sync.Map
 }
 
 type ChatSummary struct {
@@ -38,7 +40,21 @@ func (t *ChatStore) PutWithID(id, value, secret string) error {
 	if _, err = t.db.ExecContext(context.Background(), q, id, encrypted, now); err != nil {
 		return fmt.Errorf("store: put: %w", err)
 	}
+	t.cache.Delete(id)
 	return nil
+}
+
+func (t *ChatStore) CacheStore(id, decrypted string) {
+	t.cache.Store(id, decrypted)
+}
+
+func (t *ChatStore) CacheLoad(id string) (string, bool) {
+	v, ok := t.cache.Load(id)
+	if !ok {
+		return "", false
+	}
+	s, _ := v.(string)
+	return s, true
 }
 
 func (t *ChatStore) Get(id, secret string) (string, error) {
@@ -96,5 +112,6 @@ func (t *ChatStore) Delete(id string) error {
 	if _, err := t.db.ExecContext(context.Background(), q, id); err != nil {
 		return fmt.Errorf("store: delete: %w", err)
 	}
+	t.cache.Delete(id)
 	return nil
 }

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/JspBack/end-to-end-chat/message"
+	"github.com/JspBack/end-to-end-chat/signal"
 	"github.com/JspBack/end-to-end-chat/store"
 	"github.com/gorilla/websocket"
 )
@@ -29,6 +29,11 @@ func (c *Client) handleWS(w http.ResponseWriter, r *http.Request) {
 
 	if !isValidPubKey(pubKey) {
 		http.Error(w, "invalid public key\n", http.StatusBadRequest)
+		return
+	}
+
+	if pubKey == c.Keys.Public {
+		http.Error(w, "cannot connect to self\n", http.StatusForbidden)
 		return
 	}
 
@@ -186,19 +191,12 @@ func (c *Client) recvLoop(ctx context.Context, sess *Session, pubKey string) {
 			continue
 		}
 
-		msg, err := message.ToMessage(plain)
-		if err != nil {
-			c.log.WarnContext(ctx, "decode message failed", "error", err)
+		sig, parseErr := signal.Parse(plain)
+		if parseErr != nil {
+			c.log.WarnContext(ctx, "decode envelope failed", "error", parseErr)
 			continue
 		}
 
-		if _, err = message.Put(c.Store, c.Keys.Private, msg); err != nil {
-			c.log.WarnContext(ctx, "store message failed", "error", err)
-		}
-
-		if msg.To == c.Name {
-			c.log.DebugContext(ctx, "message received",
-				"from", msg.From, "to", msg.To, "content", msg.Content)
-		}
+		c.handleSignal(sig, sess, pubKey)
 	}
 }
