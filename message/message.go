@@ -3,10 +3,41 @@ package message
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/JspBack/end-to-end-chat/store"
 )
+
+func Search(s *store.Store, secret, query string, limit int) ([]Message, error) {
+	if query == "" {
+		return nil, nil
+	}
+	q := strings.ToLower(query)
+
+	summaries, err := s.Chats.List()
+	if err != nil {
+		return nil, fmt.Errorf("message: list: %w", err)
+	}
+
+	var out []Message
+	for _, sum := range summaries {
+		msg, e := Get(s, secret, sum.ID)
+		if e != nil {
+			continue
+		}
+		if !strings.Contains(strings.ToLower(msg.Content), q) &&
+			!strings.Contains(strings.ToLower(msg.From), q) &&
+			!strings.Contains(strings.ToLower(msg.To), q) {
+			continue
+		}
+		out = append(out, *msg)
+		if limit > 0 && len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
+}
 
 type Message struct {
 	From    string `json:"from"`
@@ -44,10 +75,18 @@ func Put(s *store.Store, secret string, msg *Message) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("message: store put: %w", err)
 	}
+	s.Chats.CacheStore(id, string(plain))
 	return id, nil
 }
 
 func Get(s *store.Store, secret, id string) (*Message, error) {
+	if cached, ok := s.Chats.CacheLoad(id); ok {
+		var msg Message
+		if err := json.Unmarshal([]byte(cached), &msg); err != nil {
+			return nil, fmt.Errorf("message: unmarshal: %w", err)
+		}
+		return &msg, nil
+	}
 	plain, err := s.Chats.Get(id, secret)
 	if err != nil {
 		return nil, fmt.Errorf("message: store get: %w", err)
@@ -56,6 +95,7 @@ func Get(s *store.Store, secret, id string) (*Message, error) {
 	if err = json.Unmarshal([]byte(plain), &msg); err != nil {
 		return nil, fmt.Errorf("message: unmarshal: %w", err)
 	}
+	s.Chats.CacheStore(id, plain)
 	return &msg, nil
 }
 
@@ -67,6 +107,7 @@ func Update(s *store.Store, secret, id string, msg *Message) error {
 	if err = s.Chats.Update(id, string(plain), secret); err != nil {
 		return fmt.Errorf("message: store update: %w", err)
 	}
+	s.Chats.CacheStore(id, string(plain))
 	return nil
 }
 

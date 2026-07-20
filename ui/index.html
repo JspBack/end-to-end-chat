@@ -30,6 +30,7 @@ td button { margin: 0 2px; padding: 4px 8px; font-size: 0.75rem; }
 .section-connect { background: #e8f5e9; }
 .section-send { background: #fff3e0; }
 .section-messages { background: #fce4ec; }
+.section-search { background: #e0f2fe; }
 </style>
 
 <pre style="background:none;border:none;padding:0;margin-bottom:12px;font-size:0.85rem;color:#888;">target: {{TARGET}}</pre>
@@ -66,6 +67,13 @@ td button { margin: 0 2px; padding: 4px 8px; font-size: 0.75rem; }
   <table><thead><tr><th>id</th><th>created</th><th></th></tr></thead><tbody id="messages"></tbody></table>
   <button type="button" class="btn-primary" onclick="loadMessages()">refresh</button>
   <pre id="message-detail"></pre>
+</div>
+
+<div class="section section-search">
+  <h2>Search Messages</h2>
+  <input id="search-q" placeholder="query">
+  <button type="button" class="btn-primary" onclick="searchMessages()">search</button>
+  <pre id="search-result"></pre>
 </div>
 
 <script>
@@ -127,10 +135,21 @@ async function sendMessage() {
     loadMessages();
   } catch (e) { document.getElementById('send-result').textContent = 'error: ' + e.message; }
 }
+async function searchMessages() {
+  const q = document.getElementById('search-q').value;
+  if (!q) return;
+  try {
+    const data = await api(`/api/messages/search?q=${encodeURIComponent(q)}`);
+    document.getElementById('search-result').textContent = data.length
+      ? data.map((m,i) => `${i+1}. from=${m.from} to=${m.to} content=${m.content} time=${m.time}`).join('\n')
+      : 'no results';
+  } catch (e) { document.getElementById('search-result').textContent = 'error: ' + e.message; }
+}
 window.updatePeer = updatePeer;
 window.connectPeer = connectPeer;
 window.sendMessage = sendMessage;
 window.viewMessage = viewMessage;
+window.searchMessages = searchMessages;
 loadPeers(); loadSessions(); loadMessages();
 setInterval(loadPeers, 5000);
 setInterval(loadSessions, 5000);

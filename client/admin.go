@@ -38,6 +38,7 @@ func (c *Client) registerAdminRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/messages/{pubKey}", c.localhostOnly(c.apiSendMessage))
 	mux.HandleFunc("GET /api/messages", c.localhostOnly(c.apiListMessages))
 	mux.HandleFunc("GET /api/messages/{id}", c.localhostOnly(c.apiGetMessage))
+	mux.HandleFunc("GET /api/messages/search", c.localhostOnly(c.apiSearchMessages))
 }
 
 func (c *Client) adminListPeers(w http.ResponseWriter, _ *http.Request) {
@@ -241,4 +242,24 @@ func (c *Client) apiGetMessage(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(msg)
+}
+
+func (c *Client) apiSearchMessages(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query().Get("q")
+	if q == "" {
+		http.Error(w, "missing query parameter 'q'\n", http.StatusBadRequest)
+		return
+	}
+
+	results, err := message.Search(c.Store, c.Keys.Private, q, 50)
+	if err != nil {
+		http.Error(w, err.Error()+"\n", http.StatusInternalServerError)
+		return
+	}
+	if results == nil {
+		results = []message.Message{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(results)
 }
