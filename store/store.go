@@ -12,9 +12,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	// sqLite driver.
-	_ "github.com/duckdb/duckdb-go/v2"
+	_ "modernc.org/sqlite"
 )
 
 type Store struct {
@@ -27,18 +28,21 @@ func New(dir string) *Store {
 	if err != nil {
 		panic(fmt.Errorf("store: get executable path: %w", err))
 	}
-	dbPath := filepath.Join(filepath.Dir(exe), dir+".duckdb")
-	db, err := sql.Open("duckdb", dbPath+"?access_mode=READ_WRITE")
+	dbPath := filepath.Join(filepath.Dir(exe), dir+".db")
+	db, err := sql.Open("sqlite", dbPath+"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)")
 	if err != nil {
 		panic(fmt.Errorf("store: open database: %w", err))
 	}
 	db.SetMaxOpenConns(1)
 
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
 	for _, q := range []string{
 		"CREATE TABLE IF NOT EXISTS chats (id TEXT PRIMARY KEY, value TEXT, created_at TEXT)",
 		"CREATE TABLE IF NOT EXISTS known_peers (pub_key TEXT PRIMARY KEY, peer_ip TEXT, status TEXT)",
 	} {
-		if _, err = db.ExecContext(context.Background(), q); err != nil {
+		if _, err = db.ExecContext(ctx, q); err != nil {
 			panic(fmt.Errorf("store: create table: %w", err))
 		}
 	}
