@@ -14,7 +14,7 @@ func dbPath(dir string) string {
 	if err != nil {
 		panic(err)
 	}
-	return filepath.Join(filepath.Dir(exe), dir+".db")
+	return filepath.Join(filepath.Dir(exe), dir+".duckdb")
 }
 
 func TestStorePutGet(t *testing.T) {

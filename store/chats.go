@@ -70,7 +70,7 @@ func (t *ChatStore) Update(id, value, secret string) error {
 }
 
 func (t *ChatStore) List() ([]ChatSummary, error) {
-	q := "SELECT id, COALESCE(created_at, '') FROM chats ORDER BY rowid"
+	q := "SELECT id, COALESCE(created_at, '') FROM chats ORDER BY created_at, id"
 	rows, err := t.db.QueryContext(context.Background(), q)
 	if err != nil {
 		return nil, fmt.Errorf("store: list: %w", err)
