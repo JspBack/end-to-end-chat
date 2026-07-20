@@ -2,9 +2,6 @@ package client
 
 import (
 	"encoding/json"
-	"errors"
-	"fmt"
-	"net"
 	"net/http"
 
 	"github.com/JspBack/end-to-end-chat/message"
@@ -13,38 +10,6 @@ import (
 
 type statusResponse struct {
 	Status string `json:"status"`
-}
-
-func (c *Client) localhostOnly(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		host, _, err := net.SplitHostPort(r.RemoteAddr)
-		if err != nil {
-			http.Error(w, "invalid remote address\n", http.StatusBadRequest)
-			return
-		}
-		ip := net.ParseIP(host)
-		if ip == nil || !ip.IsLoopback() {
-			c.log.WarnContext(r.Context(), "admin request from non-localhost rejected",
-				"remote", r.RemoteAddr, "path", r.URL.Path)
-			http.Error(w, "forbidden\n", http.StatusForbidden)
-			return
-		}
-		next(w, r)
-	}
-}
-
-func (c *Client) registerAdminRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /admin/peers", c.localhostOnly(c.adminListPeers))
-	mux.HandleFunc("PUT /admin/peers/{pubKey}/accept", c.localhostOnly(c.adminAcceptPeer))
-	mux.HandleFunc("PUT /admin/peers/{pubKey}/reject", c.localhostOnly(c.adminRejectPeer))
-	mux.HandleFunc("GET /admin/sessions", c.localhostOnly(c.adminListSessions))
-	mux.HandleFunc("POST /api/peers/connect", c.localhostOnly(c.apiConnectPeer))
-	mux.HandleFunc("POST /api/messages/{pubKey}", c.localhostOnly(c.apiSendMessage))
-	mux.HandleFunc("GET /api/messages", c.localhostOnly(c.apiListMessages))
-	mux.HandleFunc("GET /api/messages/{id}", c.localhostOnly(c.apiGetMessage))
-	mux.HandleFunc("GET /api/messages/search", c.localhostOnly(c.apiSearchMessages))
-	mux.HandleFunc("PUT /api/messages/{id}", c.localhostOnly(c.apiUpdateMessage))
-	mux.HandleFunc("DELETE /api/messages/{id}", c.localhostOnly(c.apiDeleteMessage))
 }
 
 func (c *Client) adminListPeers(w http.ResponseWriter, _ *http.Request) {
@@ -113,6 +78,29 @@ func (c *Client) adminRejectPeer(w http.ResponseWriter, r *http.Request) {
 	c.log.InfoContext(r.Context(), "peer rejected and closed", "pub_key", pubKey)
 }
 
+func (c *Client) adminListSessions(w http.ResponseWriter, _ *http.Request) {
+	type sessionInfo struct {
+		PubKey string `json:"pub_key"`
+		Status string `json:"status"`
+		Name   string `json:"name"`
+	}
+	out := make([]sessionInfo, 0)
+	c.sessions.Range(func(key, value interface{}) bool {
+		sess, ok := value.(*Session)
+		if !ok {
+			return true
+		}
+		pk, ok := key.(string)
+		if !ok {
+			return true
+		}
+		out = append(out, sessionInfo{PubKey: pk, Status: sess.status(), Name: sess.peerName()})
+		return true
+	})
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(out)
+}
+
 func (c *Client) apiSendMessage(w http.ResponseWriter, r *http.Request) {
 	pubKey := r.PathValue("pubKey")
 	if pubKey == "" {
@@ -158,43 +146,6 @@ func (c *Client) apiSendMessage(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(statusResponse{Status: "sent"})
-}
-
-func (c *Client) adminListSessions(w http.ResponseWriter, _ *http.Request) {
-	type sessionInfo struct {
-		PubKey string `json:"pub_key"`
-		Status string `json:"status"`
-		Name   string `json:"name"`
-	}
-	out := make([]sessionInfo, 0)
-	c.sessions.Range(func(key, value interface{}) bool {
-		sess, ok := value.(*Session)
-		if !ok {
-			return true
-		}
-		pk, ok := key.(string)
-		if !ok {
-			return true
-		}
-		out = append(out, sessionInfo{PubKey: pk, Status: sess.status(), Name: sess.peerName()})
-		return true
-	})
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(out)
-}
-
-func validateAddr(addr string) error {
-	host, port, err := net.SplitHostPort(addr)
-	if err != nil {
-		return fmt.Errorf("invalid address format (want host:port): %w", err)
-	}
-	if host == "" {
-		return errors.New("host must not be empty")
-	}
-	if port == "" {
-		return errors.New("port must not be empty")
-	}
-	return nil
 }
 
 func (c *Client) apiConnectPeer(w http.ResponseWriter, r *http.Request) {

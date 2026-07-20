@@ -274,7 +274,7 @@ func (c *Client) Listen() {
 	addr := fmt.Sprintf(":%d", c.listenPort)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/transport/", c.handleWS)
-	c.registerAdminRoutes(mux)
+	c.registerRoutes(mux)
 
 	if c.writeMode && c.peerAddr == "" {
 		go c.stdinLoop(context.Background())

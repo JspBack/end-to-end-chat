@@ -67,18 +67,31 @@ Without `-addr`, write mode listens for inbound connections and broadcasts stdin
 
 ## API
 
-| Endpoint | Description |
-|---|---|
-| `GET /api/messages` | List all messages (id + timestamp) |
-| `GET /api/messages/{id}` | Get a single message |
-| `POST /api/messages/{pubKey}` | Send a message to a connected peer |
-| `POST /api/peers/connect` | Connect to a peer (`{"addr":"host:port"}`) |
-| `GET /admin/peers` | List peers |
-| `PUT /admin/peers/{pubKey}/accept` | Accept peer |
-| `PUT /admin/peers/{pubKey}/reject` | Reject peer |
-| `GET /admin/sessions` | List active sessions |
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/messages` | List all messages (id + timestamp) |
+| `GET` | `/api/messages/search?q=` | Search messages by content, from, or to (case-insensitive) |
+| `GET` | `/api/messages/{id}` | Get a single message |
+| `POST` | `/api/messages/{pubKey}` | Send a message to a connected peer (`{"content":"..."}`) |
+| `PUT` | `/api/messages/{id}` | Update your own message (`{"content":"..."}`) |
+| `DELETE` | `/api/messages/{id}` | Delete your own message |
+| `POST` | `/api/peers/connect` | Connect to a peer (`{"addr":"host:port"}`) |
+| `GET` | `/admin/peers` | List peers |
+| `PUT` | `/admin/peers/{pubKey}/accept` | Accept peer |
+| `PUT` | `/admin/peers/{pubKey}/reject` | Reject peer |
+| `GET` | `/admin/sessions` | List active sessions |
 
 All API endpoints are localhost-only.
+
+### Protocol
+
+All peer-to-peer communication uses a typed envelope:
+
+| Type | Purpose |
+|---|---|
+| `message` | Chat message payload (from, to, content, time, id) |
+| `delete` | Delete a message by id (only owner) |
+| `update` | Update a message's content by id (only owner) |
 
 ## Flags
 
