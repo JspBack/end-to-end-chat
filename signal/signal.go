@@ -6,12 +6,14 @@ import (
 )
 
 const (
-	TypeDelete = "delete"
-	TypeUpdate = "update"
+	TypeMessage = "message"
+	TypeDelete  = "delete"
+	TypeUpdate  = "update"
 )
 
 type Signal struct {
 	Type    string `json:"type"`
+	From    string `json:"from,omitempty"`
 	ID      string `json:"id,omitempty"`
 	Content string `json:"content,omitempty"`
 }
@@ -24,7 +26,7 @@ func Parse(data []byte) (*Signal, error) {
 	return &s, nil
 }
 
-func New(typ, id, content string) []byte {
-	raw, _ := json.Marshal(Signal{Type: typ, ID: id, Content: content})
+func New(typ, from, id, content string) []byte {
+	raw, _ := json.Marshal(Signal{Type: typ, From: from, ID: id, Content: content})
 	return raw
 }

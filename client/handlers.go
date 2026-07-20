@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/JspBack/end-to-end-chat/message"
 	"github.com/JspBack/end-to-end-chat/signal"
 	"github.com/JspBack/end-to-end-chat/store"
 	"github.com/gorilla/websocket"
@@ -192,34 +191,12 @@ func (c *Client) recvLoop(ctx context.Context, sess *Session, pubKey string) {
 			continue
 		}
 
-		if sig, parseErr := signal.Parse(plain); parseErr == nil {
-			switch sig.Type {
-			case signal.TypeDelete:
-				if delErr := message.Delete(c.Store, sig.ID); delErr != nil {
-					c.log.WarnContext(ctx, "delete message failed", "error", delErr)
-				}
-				continue
-			case signal.TypeUpdate:
-				if updErr := c.applyRemoteUpdate(sig.ID, sig.Content); updErr != nil {
-					c.log.WarnContext(ctx, "update message failed", "error", updErr)
-				}
-				continue
-			}
-		}
-
-		msg, err := message.ToMessage(plain)
-		if err != nil {
-			c.log.WarnContext(ctx, "decode message failed", "error", err)
+		sig, parseErr := signal.Parse(plain)
+		if parseErr != nil {
+			c.log.WarnContext(ctx, "decode envelope failed", "error", parseErr)
 			continue
 		}
 
-		if _, err = message.Put(c.Store, c.Keys.Private, msg); err != nil {
-			c.log.WarnContext(ctx, "store message failed", "error", err)
-		}
-
-		if msg.To == c.Name {
-			c.log.DebugContext(ctx, "message received",
-				"from", msg.From, "to", msg.To, "content", msg.Content)
-		}
+		c.handleSignal(sig, sess, pubKey)
 	}
 }

@@ -17,9 +17,10 @@ func TestSignalDeleteType(t *testing.T) {
 }
 
 func TestNewDeleteSignal(t *testing.T) {
-	data := signal.New(signal.TypeDelete, "msg-123", "")
+	data := signal.New(signal.TypeDelete, "alice", "msg-123", "")
 	var s struct {
 		Type string `json:"type"`
+		From string `json:"from"`
 		ID   string `json:"id"`
 	}
 	if err := json.Unmarshal(data, &s); err != nil {
@@ -28,19 +29,25 @@ func TestNewDeleteSignal(t *testing.T) {
 	if s.Type != "delete" {
 		t.Errorf("Type = %q, want %q", s.Type, "delete")
 	}
+	if s.From != "alice" {
+		t.Errorf("From = %q, want %q", s.From, "alice")
+	}
 	if s.ID != "msg-123" {
 		t.Errorf("ID = %q, want %q", s.ID, "msg-123")
 	}
 }
 
 func TestNewUpdateSignal(t *testing.T) {
-	data := signal.New(signal.TypeUpdate, "msg-456", "new content")
+	data := signal.New(signal.TypeUpdate, "alice", "msg-456", "new content")
 	parsed, err := signal.Parse(data)
 	if err != nil {
 		t.Fatal("Parse:", err)
 	}
 	if parsed.Type != "update" {
 		t.Errorf("Type = %q, want %q", parsed.Type, "update")
+	}
+	if parsed.From != "alice" {
+		t.Errorf("From = %q, want %q", parsed.From, "alice")
 	}
 	if parsed.ID != "msg-456" {
 		t.Errorf("ID = %q, want %q", parsed.ID, "msg-456")
