@@ -32,6 +32,11 @@ func (c *Client) handleWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if pubKey == c.Keys.Public {
+		http.Error(w, "cannot connect to self\n", http.StatusForbidden)
+		return
+	}
+
 	peerIP, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		http.Error(w, "invalid remote address", http.StatusBadRequest)

@@ -1,7 +1,6 @@
 package client
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -114,6 +113,11 @@ func (c *Client) apiSendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if pubKey == c.Keys.Public {
+		http.Error(w, "cannot message self\n", http.StatusBadRequest)
+		return
+	}
+
 	var req struct {
 		Content string `json:"content"`
 	}
@@ -199,14 +203,14 @@ func (c *Client) apiConnectPeer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	go func() {
-		if err := c.connectSession(context.Background(), req.Addr); err != nil {
-			c.log.WarnContext(r.Context(), "connect peer", "addr", req.Addr, "error", err)
-		}
-	}()
+	if err := c.connectSession(r.Context(), req.Addr); err != nil {
+		c.log.WarnContext(r.Context(), "connect peer", "addr", req.Addr, "error", err)
+		http.Error(w, err.Error()+"\n", http.StatusBadGateway)
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]string{"status": "connecting"})
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "connected"})
 }
 
 func (c *Client) apiListMessages(w http.ResponseWriter, _ *http.Request) {
