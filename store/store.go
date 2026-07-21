@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"time"
 
+	gocache "github.com/patrickmn/go-cache"
 	// sqLite driver.
 	_ "modernc.org/sqlite"
 )
@@ -34,7 +35,7 @@ func New(dir string) *Store {
 	if err != nil {
 		panic(fmt.Errorf("store: open database: %w", err))
 	}
-	db.SetMaxOpenConns(1)
+	db.SetMaxOpenConns(8)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -43,6 +44,10 @@ func New(dir string) *Store {
 		"CREATE TABLE IF NOT EXISTS chats (id TEXT PRIMARY KEY, value TEXT, created_at TEXT)",
 		"CREATE TABLE IF NOT EXISTS known_peers (pub_key TEXT PRIMARY KEY, peer_ip TEXT, status TEXT)",
 		"CREATE TABLE IF NOT EXISTS files (id TEXT PRIMARY KEY, data BLOB, msg_id TEXT, created_at TEXT)",
+		"CREATE TABLE IF NOT EXISTS chat_search (msg_id TEXT PRIMARY KEY, from_name TEXT, to_name TEXT, search_text TEXT)",
+
+		"CREATE INDEX IF NOT EXISTS idx_chats_created_at ON chats (created_at, id)",
+		"CREATE INDEX IF NOT EXISTS idx_files_msg_id ON files (msg_id)",
 	} {
 		if _, err = db.ExecContext(ctx, q); err != nil {
 			panic(fmt.Errorf("store: create table: %w", err))
@@ -50,7 +55,7 @@ func New(dir string) *Store {
 	}
 
 	return &Store{
-		Chats:      &ChatStore{db: db},
+		Chats:      &ChatStore{db: db, cache: gocache.New(10*time.Minute, 1*time.Minute)},
 		KnownPeers: &KnownPeerStore{db: db},
 		Files:      &FileStore{db: db},
 	}

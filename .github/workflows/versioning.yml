@@ -6,6 +6,8 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
+  checks: write
 
 jobs:
   tag:
@@ -18,7 +20,32 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: "1.26.2"
+          go-version: 1.26.2
+          cache: true
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.12.2
+
+      - name: run go vet
+        uses: reviewdog/action-govet@v1.5.0
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          reporter: github-pr-check
+
+      - name: run go test
+        id: test
+        run: go test -json ./... -count=1 -coverprofile=coverage.out > test-results.json
+
+      - name: Publish Test Report
+        uses: robherley/go-test-action@v1
+        if: always()
+        with:
+          fromJSONFiles: test-results.json
+
+      - name: go build
+        run: go build ./...
 
       - name: bump and tag
         run: |

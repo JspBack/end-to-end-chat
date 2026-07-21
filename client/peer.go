@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/JspBack/end-to-end-chat/message"
-	"github.com/JspBack/end-to-end-chat/signal"
 	"github.com/JspBack/end-to-end-chat/store"
 	"github.com/gorilla/websocket"
 )
@@ -171,22 +170,7 @@ func (c *Client) peerReadLoop(sess *Session) error {
 			continue
 		}
 
-		if !sess.msgLimiter.Allow() {
-			c.log.Warn("rate limit exceeded, dropping message", "remote", sess.conn.RemoteAddr())
-			continue
-		}
-
-		if sess.status() != store.PeerStatusAccepted {
-			continue
-		}
-
-		sig, parseErr := signal.Parse(plain)
-		if parseErr != nil {
-			c.log.Warn("decode envelope failed", "error", parseErr)
-			continue
-		}
-
-		c.handleSignal(sig, sess, sess.peerPubKey())
+		c.handleDecrypted(plain, sess, sess.peerPubKey())
 	}
 }
 

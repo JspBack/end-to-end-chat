@@ -7,25 +7,10 @@ import (
 	"fmt"
 	"os"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 type FileStore struct {
 	db *sql.DB
-}
-
-type FileEntry struct {
-	ID    string `json:"id"`
-	MsgID string `json:"msg_id"`
-}
-
-func (f *FileStore) Put(secret, msgID string, data []byte) (string, error) {
-	id := uuid.New().String()
-	if err := f.PutWithID(secret, id, msgID, data); err != nil {
-		return "", err
-	}
-	return id, nil
 }
 
 func (f *FileStore) PutWithID(secret, id, msgID string, data []byte) error {
@@ -63,35 +48,4 @@ func (f *FileStore) Delete(id string) error {
 		return fmt.Errorf("store: file delete: %w", err)
 	}
 	return nil
-}
-
-func (f *FileStore) DeleteByMessage(msgID string) error {
-	q := "DELETE FROM files WHERE msg_id = ?"
-	if _, err := f.db.ExecContext(context.Background(), q, msgID); err != nil {
-		return fmt.Errorf("store: file delete by message: %w", err)
-	}
-	return nil
-}
-
-func (f *FileStore) ListByMessage(msgID string) ([]FileEntry, error) {
-	q := "SELECT id FROM files WHERE msg_id = ?"
-	rows, err := f.db.QueryContext(context.Background(), q, msgID)
-	if err != nil {
-		return nil, fmt.Errorf("store: list files: %w", err)
-	}
-	defer rows.Close()
-
-	var out []FileEntry
-	for rows.Next() {
-		var e FileEntry
-		e.MsgID = msgID
-		if err = rows.Scan(&e.ID); err != nil {
-			return nil, fmt.Errorf("store: scan file: %w", err)
-		}
-		out = append(out, e)
-	}
-	if err = rows.Err(); err != nil {
-		return nil, fmt.Errorf("store: list files rows: %w", err)
-	}
-	return out, nil
 }

@@ -33,37 +33,19 @@ func Search(s *store.Store, secret, query string, limit int) ([]Message, error) 
 	if query == "" {
 		return nil, nil
 	}
-	q := strings.ToLower(query)
 
-	summaries, err := s.Chats.List()
+	ids, err := s.Chats.Search(query, limit)
 	if err != nil {
-		return nil, fmt.Errorf("message: list: %w", err)
+		return nil, fmt.Errorf("message: search index: %w", err)
 	}
 
 	var out []Message
-	for _, sum := range summaries {
-		msg, e := Get(s, secret, sum.ID)
-		if e != nil {
-			continue
-		}
-		matched := strings.Contains(strings.ToLower(msg.Content), q) ||
-			strings.Contains(strings.ToLower(msg.From), q) ||
-			strings.Contains(strings.ToLower(msg.To), q)
-		if !matched {
-			for _, a := range msg.Attachments {
-				if strings.Contains(strings.ToLower(a.Name), q) {
-					matched = true
-					break
-				}
-			}
-		}
-		if !matched {
+	for _, id := range ids {
+		msg, getErr := Get(s, secret, id)
+		if getErr != nil {
 			continue
 		}
 		out = append(out, *msg)
-		if limit > 0 && len(out) >= limit {
-			break
-		}
 	}
 	return out, nil
 }
@@ -79,6 +61,7 @@ type Attachment struct {
 type Message struct {
 	ID          string       `json:"id,omitempty"`
 	From        string       `json:"from"`
+	FromPubKey  string       `json:"from_pub_key,omitempty"`
 	To          string       `json:"to"`
 	Content     string       `json:"content"`
 	Time        string       `json:"time"`
@@ -105,6 +88,18 @@ func ToMessage(data []byte) (*Message, error) {
 	return &m, nil
 }
 
+func searchText(msg *Message) string {
+	var b strings.Builder
+	b.WriteString(msg.Content)
+	for _, a := range msg.Attachments {
+		if a.Name != "" {
+			b.WriteString(" ")
+			b.WriteString(a.Name)
+		}
+	}
+	return b.String()
+}
+
 func Put(s *store.Store, secret string, msg *Message) (string, error) {
 	plain, err := json.Marshal(msg)
 	if err != nil {
@@ -123,6 +118,7 @@ func Put(s *store.Store, secret string, msg *Message) (string, error) {
 		}
 		msg.ID = id
 	}
+	_ = s.Chats.IndexSearch(id, msg.From, msg.To, searchText(msg))
 	s.Chats.CacheStore(id, string(plain))
 	return id, nil
 }
@@ -155,6 +151,7 @@ func Update(s *store.Store, secret, id string, msg *Message) error {
 	if err = s.Chats.Update(id, string(plain), secret); err != nil {
 		return fmt.Errorf("message: store update: %w", err)
 	}
+	_ = s.Chats.IndexSearch(id, msg.From, msg.To, searchText(msg))
 	s.Chats.CacheStore(id, string(plain))
 	return nil
 }
