@@ -3,6 +3,8 @@ package client
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"strconv"
@@ -10,6 +12,7 @@ import (
 	"github.com/JspBack/end-to-end-chat/config"
 	"github.com/JspBack/end-to-end-chat/message"
 	"github.com/JspBack/end-to-end-chat/store"
+	"github.com/google/uuid"
 )
 
 type statusResponse struct {
@@ -105,6 +108,37 @@ func (c *Client) adminListSessions(w http.ResponseWriter, _ *http.Request) {
 	_ = json.NewEncoder(w).Encode(out)
 }
 
+func parseMessageForm(r *http.Request, maxSize int64) (string, []message.Attachment, error) {
+	if err := r.ParseMultipartForm(maxSize); err != nil {
+		return "", nil, errors.New("invalid form")
+	}
+	content := r.FormValue("content")
+	var atts []message.Attachment
+	var totalSize int64
+	for _, fh := range r.MultipartForm.File["files"] {
+		totalSize += fh.Size
+		if totalSize > maxSize {
+			return "", nil, fmt.Errorf("attachments exceed max size %d", maxSize)
+		}
+		f, fe := fh.Open()
+		if fe != nil {
+			return "", nil, errors.New("read file")
+		}
+		data, fe := io.ReadAll(f)
+		f.Close()
+		if fe != nil {
+			return "", nil, errors.New("read file")
+		}
+		atts = append(atts, message.Attachment{
+			Name:     fh.Filename,
+			MIMEType: fh.Header.Get("Content-Type"),
+			Size:     fh.Size,
+			Data:     data,
+		})
+	}
+	return content, atts, nil
+}
+
 func (c *Client) apiSendMessage(w http.ResponseWriter, r *http.Request) {
 	pubKey := r.PathValue("pubKey")
 	if pubKey == "" {
@@ -117,13 +151,12 @@ func (c *Client) apiSendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req struct {
-		Content string `json:"content"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid body\n", http.StatusBadRequest)
+	content, attachments, formErr := parseMessageForm(r, c.MaxMessageSize)
+	if formErr != nil {
+		http.Error(w, formErr.Error()+"\n", http.StatusBadRequest)
 		return
 	}
+	defer func() { _ = r.MultipartForm.RemoveAll() }()
 
 	v, ok := c.sessions.Load(pubKey)
 	if !ok {
@@ -143,9 +176,35 @@ func (c *Client) apiSendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := c.sendMessage(sess, req.Content); err != nil {
+	msg := message.NewMessage(c.Name, sess.peerName(), content)
+	haveFiles := len(attachments) > 0
+	if haveFiles {
+		msg.ID = uuid.New().String()
+		for i := range attachments {
+			attachments[i].ID = uuid.New().String()
+		}
+		msg.Attachments = make([]message.Attachment, len(attachments))
+		for i, a := range attachments {
+			msg.Attachments[i] = message.Attachment{
+				ID: a.ID, Name: a.Name, MIMEType: a.MIMEType, Size: a.Size,
+			}
+		}
+	}
+
+	if err := c.sendMessage(sess, msg); err != nil {
 		http.Error(w, "send failed\n", http.StatusInternalServerError)
 		return
+	}
+
+	if haveFiles {
+		for _, att := range attachments {
+			if err := c.sendFile(sess, att.ID, att.Data); err != nil {
+				c.log.WarnContext(r.Context(), "send file failed", "id", att.ID, "error", err)
+			}
+		}
+		if err := message.StoreAttachments(c.Store, c.Keys.Private, msg.ID, attachments); err != nil {
+			c.log.WarnContext(r.Context(), "store attachments failed", "error", err)
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -284,6 +343,24 @@ func (c *Client) apiUpdateMessage(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(statusResponse{Status: "updated"})
 }
 
+func (c *Client) apiGetFile(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		http.Error(w, "missing id\n", http.StatusBadRequest)
+		return
+	}
+
+	raw, err := c.Store.Files.Get(c.Keys.Private, id)
+	if err != nil {
+		http.Error(w, err.Error()+"\n", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Length", strconv.Itoa(len(raw)))
+	_, _ = w.Write(raw)
+}
+
 func (c *Client) apiDeleteMessage(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
@@ -302,7 +379,7 @@ func (c *Client) apiDeleteMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if delErr := message.Delete(c.Store, id); delErr != nil {
+	if delErr := message.Delete(c.Store, c.Keys.Private, id); delErr != nil {
 		http.Error(w, delErr.Error()+"\n", http.StatusInternalServerError)
 		return
 	}

@@ -70,11 +70,12 @@ Without `-addr`, write mode listens for inbound connections and broadcasts stdin
 | Method | Endpoint | Description |
 |---|---|---|
 | `GET` | `/api/messages` | List all messages (id + timestamp) |
-| `GET` | `/api/messages/search?q=` | Search messages by content, from, or to (case-insensitive) |
+| `GET` | `/api/messages/search?q=` | Search messages by content, from, to, or attachment name (case-insensitive) |
 | `GET` | `/api/messages/{id}` | Get a single message |
-| `POST` | `/api/messages/{pubKey}` | Send a message to a connected peer (`{"content":"..."}`) |
+| `POST` | `/api/messages/{pubKey}` | Send a message to a connected peer |
 | `PUT` | `/api/messages/{id}` | Update your own message (`{"content":"..."}`) |
 | `DELETE` | `/api/messages/{id}` | Delete your own message |
+| `GET` | `/api/files/{id}` | Download a file attachment (raw bytes) |
 | `POST` | `/api/peers/connect` | Connect to a peer (`{"addr":"host:port"}`) |
 | `GET` | `/admin/peers` | List peers |
 | `PUT` | `/admin/peers/{pubKey}/accept` | Accept peer |
@@ -85,11 +86,11 @@ All API endpoints are localhost-only.
 
 ### Protocol
 
-All peer-to-peer communication uses a typed envelope:
+All peer-to-peer communication uses a typed envelope. Attachment data is encoded as base64 within the `message` envelope by Go's json.Marshal (`[]byte` marshals to base64):
 
 | Type | Purpose |
 |---|---|
-| `message` | Chat message payload (from, to, content, time, id) |
+| `message` | Chat message payload (from, to, content, time, id, attachments[]) |
 | `delete` | Delete a message by id (only owner) |
 | `update` | Update a message's content by id (only owner) |
 
@@ -105,7 +106,7 @@ All peer-to-peer communication uses a typed envelope:
 | `-t` | `15s` | Timeout for operations |
 | `-rate-limit` | `100` | HTTP requests per window per IP |
 | `-rate-window` | `1m` | Rate limiter window duration |
-| `-max-msg-size` | `1MB` | Maximum message size in bytes |
+| `-max-msg-size` | `50MB` | Maximum message size in bytes |
 | `-ping-window` | `5s` | Ping window duration |
 | `-cert` | `""` | TLS certificate file path |
 | `-key` | `""` | TLS private key file path |

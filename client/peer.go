@@ -10,6 +10,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/JspBack/end-to-end-chat/message"
 	"github.com/JspBack/end-to-end-chat/signal"
 	"github.com/JspBack/end-to-end-chat/store"
 	"github.com/gorilla/websocket"
@@ -198,7 +199,8 @@ func (c *Client) peerWriteLoop(ctx context.Context, sess *Session, lines <-chan 
 			if !ok {
 				return
 			}
-			if err := c.sendMessage(sess, line); err != nil {
+			msg := message.NewMessage(c.Name, sess.peerName(), line)
+			if err := c.sendMessage(sess, msg); err != nil {
 				c.log.WarnContext(ctx, "send failed", "peer", sess.peerName(), "error", err)
 			}
 		}

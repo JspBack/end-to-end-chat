@@ -19,7 +19,7 @@ const (
 	DefaultTimeout          = 15 * time.Second
 	DefaultRateLimit        = 100
 	DefaultRateWindow       = time.Minute
-	MaxMessageSize    int64 = 1 << 20
+	MaxMessageSize    int64 = 50 << 20
 	DefaultPingWindow       = 5 * time.Second
 )
 

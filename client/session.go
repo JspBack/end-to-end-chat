@@ -182,7 +182,7 @@ func (s *Session) handshake(ctx context.Context, initiator bool) error {
 
 	s.log.DebugContext(ctx, "handshake done",
 		"remote", s.conn.RemoteAddr(),
-		"peer_name", s.peerName,
+		"peer_name", s.peerName(),
 		"peer_static_pub", peer.StaticPubKey,
 	)
 	return nil

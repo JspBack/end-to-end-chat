@@ -57,7 +57,8 @@ td button { margin: 0 2px; padding: 4px 8px; font-size: 0.75rem; }
 <div class="section section-send">
   <h2>Send</h2>
   <input id="send-pubkey" placeholder="peer pubkey">
-  <input id="send-content" placeholder="message">
+  <input id="send-content" placeholder="message" style="width:400px">
+  <input id="send-file" type="file" multiple style="display:block;margin:4px 0">
   <button type="button" class="btn-primary" onclick="sendMessage()">send</button>
   <pre id="send-result"></pre>
 </div>
@@ -116,8 +117,13 @@ async function loadMessages() {
 }
 async function viewMessage(id) {
   const msg = await api(`/api/messages/${id}`);
+  const attHtml = msg.attachments && msg.attachments.length
+    ? '<div style="margin:8px 0"><b>Attachments:</b><ul>' + msg.attachments.map(a =>
+        `<li><a href="/api/files/${a.id}" download="${escapeHtml(a.name)}"><button type="button">${escapeHtml(a.name)}</button></a></li>`
+      ).join('') + '</ul></div>'
+    : '';
   const detail = document.getElementById('message-detail');
-  detail.innerHTML = `<pre>${JSON.stringify(msg, null, 2)}</pre>
+  detail.innerHTML = `<pre>${JSON.stringify(msg, null, 2)}</pre>${attHtml}
     <input id="edit-content" value="${escapeHtml(msg.content)}" style="width:400px">
     <button type="button" class="btn-success" onclick="updateMessage('${id}')">update</button>`;
 }
@@ -149,11 +155,18 @@ async function connectPeer() {
 async function sendMessage() {
   const pk = document.getElementById('send-pubkey').value;
   const msg = document.getElementById('send-content').value;
-  if (!pk || !msg) return;
+  if (!pk) return;
+  const fileInput = document.getElementById('send-file');
+  const fd = new FormData();
+  fd.append('content', msg);
+  for (const f of fileInput.files) fd.append('files', f);
   try {
-    const r = await api(`/api/messages/${pk}`, { method: 'POST', body: JSON.stringify({ content: msg }) });
-    document.getElementById('send-result').textContent = JSON.stringify(r);
+    const res = await fetch(`/api/messages/${pk}`, { method: 'POST', body: fd });
+    const text = await res.text();
+    if (!res.ok) throw new Error(text.trim());
+    document.getElementById('send-result').textContent = text;
     document.getElementById('send-content').value = '';
+    fileInput.value = '';
     loadMessages();
   } catch (e) { document.getElementById('send-result').textContent = 'error: ' + e.message; }
 }
@@ -163,7 +176,11 @@ async function searchMessages() {
   try {
     const data = await api(`/api/messages/search?q=${encodeURIComponent(q)}`);
     document.getElementById('search-result').textContent = data.length
-      ? data.map((m,i) => `${i+1}. from=${m.from} to=${m.to} content=${m.content} time=${m.time}`).join('\n')
+      ? data.map((m,i) => {
+          const att = m.attachments && m.attachments.length
+            ? ' [attachments: ' + m.attachments.map(a => a.name).join(', ') + ']' : '';
+          return `${i+1}. from=${m.from} to=${m.to} content=${m.content}${att} time=${m.time}`;
+        }).join('\n')
       : 'no results';
   } catch (e) { document.getElementById('search-result').textContent = 'error: ' + e.message; }
 }

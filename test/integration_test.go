@@ -121,7 +121,7 @@ func TestMessageDelete(t *testing.T) {
 		t.Fatal("Put:", err)
 	}
 
-	err = message.Delete(s, id)
+	err = message.Delete(s, "secret", id)
 	if err != nil {
 		t.Fatal("Delete:", err)
 	}
@@ -318,6 +318,204 @@ func TestSearchEmptyQuery(t *testing.T) {
 	}
 	if results != nil {
 		t.Errorf("expected nil for empty query, got %v", results)
+	}
+}
+
+func TestAttachmentStoreAndRetrieve(t *testing.T) {
+	dir := "test_attachment"
+	s := store.New(dir)
+	defer os.Remove(dbPath(dir))
+
+	att := message.Attachment{
+		Name:     "test.txt",
+		MIMEType: "text/plain",
+		Data:     []byte("hello world"),
+	}
+	msg := message.NewMessage("alice", "bob", "file", att)
+	msg.ID = "att-test-msg-id"
+
+	if err := message.StoreAttachments(s, "secret", msg.ID, msg.Attachments); err != nil {
+		t.Fatal("StoreAttachments:", err)
+	}
+
+	id, err := message.Put(s, "secret", msg)
+	if err != nil {
+		t.Fatal("Put:", err)
+	}
+
+	got, err := message.Get(s, "secret", id)
+	if err != nil {
+		t.Fatal("Get:", err)
+	}
+	if len(got.Attachments) != 1 {
+		t.Fatalf("expected 1 attachment, got %d", len(got.Attachments))
+	}
+	if got.Attachments[0].Name != "test.txt" {
+		t.Errorf("Name = %q, want %q", got.Attachments[0].Name, "test.txt")
+	}
+	if len(got.Attachments[0].Data) != 0 {
+		t.Errorf("Data should be nil after storage, got %v", got.Attachments[0].Data)
+	}
+	if got.Attachments[0].ID == "" {
+		t.Fatal("attachment ID should not be empty")
+	}
+
+	raw, err := s.Files.Get("secret", got.Attachments[0].ID)
+	if err != nil {
+		t.Fatal("Files.Get:", err)
+	}
+	if string(raw) != "hello world" {
+		t.Errorf("file content = %q, want %q", string(raw), "hello world")
+	}
+}
+
+func TestSearchAttachmentName(t *testing.T) {
+	dir := "test_search_attname"
+	s := store.New(dir)
+	defer os.Remove(dbPath(dir))
+
+	att := message.Attachment{
+		Name: "report.pdf",
+		Data: []byte("pdf data"),
+	}
+	msg := message.NewMessage("alice", "bob", "here it is", att)
+	msg.ID = "search-att-msg"
+	var err error
+	if err = message.StoreAttachments(s, "secret", msg.ID, msg.Attachments); err != nil {
+		t.Fatal("StoreAttachments:", err)
+	}
+	if _, err = message.Put(s, "secret", msg); err != nil {
+		t.Fatal("Put:", err)
+	}
+
+	results, err := message.Search(s, "secret", "report", 10)
+	if err != nil {
+		t.Fatal("Search:", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result for 'report', got %d", len(results))
+	}
+	if results[0].Content != "here it is" {
+		t.Errorf("Content = %q, want %q", results[0].Content, "here it is")
+	}
+}
+
+func TestMessageDeleteRemovesFiles(t *testing.T) {
+	dir := "test_delete_files"
+	s := store.New(dir)
+	defer os.Remove(dbPath(dir))
+
+	att := message.Attachment{
+		Name: "photo.jpg",
+		Data: []byte("image data"),
+	}
+	msg := message.NewMessage("alice", "bob", "pic", att)
+	msg.ID = "delete-files-msg"
+	if err := message.StoreAttachments(s, "secret", msg.ID, msg.Attachments); err != nil {
+		t.Fatal("StoreAttachments:", err)
+	}
+	id, err := message.Put(s, "secret", msg)
+	if err != nil {
+		t.Fatal("Put:", err)
+	}
+
+	files, err := s.Files.ListByMessage(id)
+	if err != nil {
+		t.Fatal("ListByMessage:", err)
+	}
+	if len(files) != 1 {
+		t.Fatalf("expected 1 file, got %d", len(files))
+	}
+
+	if err = message.Delete(s, "secret", id); err != nil {
+		t.Fatal("Delete:", err)
+	}
+
+	files, err = s.Files.ListByMessage(id)
+	if err != nil {
+		t.Fatal("ListByMessage after delete:", err)
+	}
+	if len(files) != 0 {
+		t.Errorf("expected 0 files after delete, got %d", len(files))
+	}
+}
+
+func TestMultipleAttachments(t *testing.T) {
+	dir := "test_multi_att"
+	s := store.New(dir)
+	defer os.Remove(dbPath(dir))
+
+	att1 := message.Attachment{
+		Name: "doc.txt",
+		Data: []byte("text content"),
+	}
+	att2 := message.Attachment{
+		Name: "img.png",
+		Data: []byte("png data"),
+	}
+	msg := message.NewMessage("alice", "bob", "two files", att1, att2)
+	msg.ID = "multi-att-msg"
+	if err := message.StoreAttachments(s, "secret", msg.ID, msg.Attachments); err != nil {
+		t.Fatal("StoreAttachments:", err)
+	}
+	var putErr error
+	if _, putErr = message.Put(s, "secret", msg); putErr != nil {
+		t.Fatal("Put:", putErr)
+	}
+
+	got, err := message.Get(s, "secret", msg.ID)
+	if err != nil {
+		t.Fatal("Get:", err)
+	}
+	if len(got.Attachments) != 2 {
+		t.Fatalf("expected 2 attachments, got %d", len(got.Attachments))
+	}
+	if got.Attachments[0].Name != "doc.txt" || got.Attachments[1].Name != "img.png" {
+		t.Errorf("attachment names mismatch")
+	}
+	for _, a := range got.Attachments {
+		var raw []byte
+		raw, err = s.Files.Get("secret", a.ID)
+		if err != nil {
+			t.Fatalf("Files.Get(%q): %v", a.ID, err)
+		}
+		if len(raw) == 0 {
+			t.Errorf("empty file data for %q", a.ID)
+		}
+	}
+}
+
+func TestStoreAttachmentsEmptyData(t *testing.T) {
+	dir := "test_empty_attdata"
+	s := store.New(dir)
+	defer os.Remove(dbPath(dir))
+
+	att := message.Attachment{Name: "empty.bin"}
+	msg := message.NewMessage("alice", "bob", "empty att", att)
+	msg.ID = "empty-att-msg"
+	if err := message.StoreAttachments(s, "secret", msg.ID, msg.Attachments); err != nil {
+		t.Fatal("StoreAttachments:", err)
+	}
+	if _, err := message.Put(s, "secret", msg); err != nil {
+		t.Fatal("Put:", err)
+	}
+
+	got, err := message.Get(s, "secret", msg.ID)
+	if err != nil {
+		t.Fatal("Get:", err)
+	}
+	if len(got.Attachments) != 1 {
+		t.Fatalf("expected 1 attachment, got %d", len(got.Attachments))
+	}
+	if got.Attachments[0].Name != "empty.bin" {
+		t.Errorf("Name = %q", got.Attachments[0].Name)
+	}
+	files, err := s.Files.ListByMessage(msg.ID)
+	if err != nil {
+		t.Fatal("ListByMessage:", err)
+	}
+	if len(files) != 0 {
+		t.Errorf("expected 0 files for empty data, got %d", len(files))
 	}
 }
 
