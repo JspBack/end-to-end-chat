@@ -1,8 +1,6 @@
 package client
 
 import (
-	"errors"
-	"fmt"
 	"net"
 	"net/http"
 )
@@ -23,17 +21,6 @@ func (c *Client) localhostOnly(next http.HandlerFunc) http.HandlerFunc {
 		}
 		next(w, r)
 	}
-}
-
-func validateAddr(addr string) error {
-	_, port, err := net.SplitHostPort(addr)
-	if err != nil {
-		return fmt.Errorf("invalid address format (want host:port): %w", err)
-	}
-	if port == "" {
-		return errors.New("port must not be empty")
-	}
-	return nil
 }
 
 func (c *Client) registerRoutes(mux *http.ServeMux) {
