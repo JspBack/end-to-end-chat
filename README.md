@@ -86,13 +86,12 @@ All API endpoints are localhost-only.
 
 ### Protocol
 
-All peer-to-peer communication uses a typed envelope. Attachment data is encoded as base64 within the `message` envelope by Go's json.Marshal (`[]byte` marshals to base64):
-
 | Type | Purpose |
 |---|---|
 | `message` | Chat message payload (from, to, content, time, id, attachments[]) |
 | `delete` | Delete a message by id (only owner) |
 | `update` | Update a message's content by id (only owner) |
+| `file` | Send the message's attachment |
 
 ## Flags
 
