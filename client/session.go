@@ -21,7 +21,10 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-const keyExchangeType = "key_exchange"
+const (
+	keyExchangeType = "key_exchange"
+	nonceSize       = 12
+)
 
 type keyExchangeMsg struct {
 	Type         string `json:"type"`
@@ -29,11 +32,6 @@ type keyExchangeMsg struct {
 	StaticPubKey string `json:"static_pub_key"`
 	ClientName   string `json:"client_name"`
 	Signature    string `json:"signature"`
-}
-
-type encryptedMsg struct {
-	Nonce  string `json:"nonce"`
-	Cipher string `json:"cipher"`
 }
 
 type Session struct {
@@ -207,7 +205,7 @@ func (s *Session) encrypt(plain []byte) ([]byte, error) {
 		return nil, errors.New("session: no key established")
 	}
 	key := s.sendKey
-	nonce := make([]byte, 12)
+	nonce := make([]byte, nonceSize)
 	binary.BigEndian.PutUint64(nonce[:8], s.sendNonce)
 	s.sendNonce++
 	s.mu.Unlock()
@@ -217,46 +215,33 @@ func (s *Session) encrypt(plain []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	msg := encryptedMsg{
-		Nonce:  base64.StdEncoding.EncodeToString(nonce),
-		Cipher: base64.StdEncoding.EncodeToString(gcm.Seal(nil, nonce, plain, nil)),
-	}
-	out, err := json.Marshal(msg)
-	if err != nil {
-		return nil, fmt.Errorf("session: marshal encrypted: %w", err)
-	}
+	ciphertext := gcm.Seal(nil, nonce, plain, nil)
+	out := make([]byte, nonceSize+len(ciphertext))
+	copy(out[:nonceSize], nonce)
+	copy(out[nonceSize:], ciphertext)
 	return out, nil
 }
 
 func (s *Session) decrypt(data []byte) ([]byte, error) {
+	if len(data) < nonceSize {
+		return nil, errors.New("session: data too short")
+	}
+
 	s.mu.Lock()
 	if s.recvKey == nil {
 		s.mu.Unlock()
 		return nil, errors.New("session: no key established")
 	}
 	key := s.recvKey
-	expectedNonce := make([]byte, 12)
+	expectedNonce := make([]byte, nonceSize)
 	binary.BigEndian.PutUint64(expectedNonce[:8], s.recvNonce)
-	s.recvNonce++
 	s.mu.Unlock()
 
-	var msg encryptedMsg
-	if err := json.Unmarshal(data, &msg); err != nil {
-		return nil, fmt.Errorf("session: unmarshal: %w", err)
-	}
+	nonce := data[:nonceSize]
+	ciphertext := data[nonceSize:]
 
-	nonce, err := base64.StdEncoding.DecodeString(msg.Nonce)
-	if err != nil {
-		return nil, fmt.Errorf("session: decode nonce: %w", err)
-	}
-
-	if len(nonce) != 12 || binary.BigEndian.Uint64(nonce[:8]) != binary.BigEndian.Uint64(expectedNonce[:8]) {
+	if binary.BigEndian.Uint64(nonce[:8]) != binary.BigEndian.Uint64(expectedNonce[:8]) {
 		return nil, errors.New("session: nonce mismatch — possible replay or out-of-order delivery")
-	}
-
-	ciphertext, err := base64.StdEncoding.DecodeString(msg.Cipher)
-	if err != nil {
-		return nil, fmt.Errorf("session: decode cipher: %w", err)
 	}
 
 	gcm, err := aesGCM(key)
@@ -268,6 +253,10 @@ func (s *Session) decrypt(data []byte) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("session: decrypt: %w", err)
 	}
+
+	s.mu.Lock()
+	s.recvNonce++
+	s.mu.Unlock()
 	return plain, nil
 }
 
@@ -286,7 +275,7 @@ func (s *Session) send(plain []byte) error {
 	if err = s.conn.SetWriteDeadline(time.Now().Add(s.timeout)); err != nil {
 		return fmt.Errorf("session: set write deadline: %w", err)
 	}
-	if err = s.conn.WriteMessage(websocket.TextMessage, enc); err != nil {
+	if err = s.conn.WriteMessage(websocket.BinaryMessage, enc); err != nil {
 		return fmt.Errorf("session: write: %w", err)
 	}
 	return nil

@@ -6,15 +6,15 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
+	gocache "github.com/patrickmn/go-cache"
 )
 
 type ChatStore struct {
 	db    *sql.DB
-	cache sync.Map
+	cache *gocache.Cache
 }
 
 type ChatSummary struct {
@@ -40,16 +40,20 @@ func (t *ChatStore) PutWithID(id, value, secret string) error {
 	if _, err = t.db.ExecContext(context.Background(), q, id, encrypted, now); err != nil {
 		return fmt.Errorf("store: put: %w", err)
 	}
-	t.cache.Delete(id)
+	t.cacheDelete(id)
 	return nil
 }
 
+func (t *ChatStore) cacheDelete(id string) {
+	t.cache.Delete(id)
+}
+
 func (t *ChatStore) CacheStore(id, decrypted string) {
-	t.cache.Store(id, decrypted)
+	t.cache.Set(id, decrypted, gocache.DefaultExpiration)
 }
 
 func (t *ChatStore) CacheLoad(id string) (string, bool) {
-	v, ok := t.cache.Load(id)
+	v, ok := t.cache.Get(id)
 	if !ok {
 		return "", false
 	}
@@ -107,11 +111,56 @@ func (t *ChatStore) List() ([]ChatSummary, error) {
 	return out, nil
 }
 
+func (t *ChatStore) IndexSearch(id, fromName, toName, searchText string) error {
+	q := "INSERT OR REPLACE INTO chat_search (msg_id, from_name, to_name, search_text) VALUES (?, ?, ?, ?)"
+	_, err := t.db.ExecContext(context.Background(), q, id, fromName, toName, searchText)
+	if err != nil {
+		return fmt.Errorf("store: index search: %w", err)
+	}
+	return nil
+}
+
+func (t *ChatStore) deleteSearchIndex(id string) error {
+	_, err := t.db.ExecContext(context.Background(), "DELETE FROM chat_search WHERE msg_id = ?", id)
+	if err != nil {
+		return fmt.Errorf("store: delete search index: %w", err)
+	}
+	return nil
+}
+
+func (t *ChatStore) Search(query string, limit int) ([]string, error) {
+	q := "SELECT msg_id FROM chat_search WHERE from_name LIKE ? OR to_name LIKE ? OR search_text LIKE ? ORDER BY msg_id"
+	args := []interface{}{"%" + query + "%", "%" + query + "%", "%" + query + "%"}
+	if limit > 0 {
+		q += " LIMIT ?"
+		args = append(args, limit)
+	}
+	rows, err := t.db.QueryContext(context.Background(), q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("store: search: %w", err)
+	}
+	defer rows.Close()
+
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err = rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("store: search scan: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: search rows: %w", err)
+	}
+	return ids, nil
+}
+
 func (t *ChatStore) Delete(id string) error {
 	q := "DELETE FROM chats WHERE id = ?"
 	if _, err := t.db.ExecContext(context.Background(), q, id); err != nil {
 		return fmt.Errorf("store: delete: %w", err)
 	}
-	t.cache.Delete(id)
+	_ = t.deleteSearchIndex(id)
+	t.cacheDelete(id)
 	return nil
 }

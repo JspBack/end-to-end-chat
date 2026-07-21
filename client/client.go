@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -137,6 +138,7 @@ func (c *Client) Shutdown() {
 }
 
 func (c *Client) sendMessage(sess *Session, msg *message.Message) error {
+	msg.FromPubKey = c.Keys.Public
 	if _, err := message.Put(c.Store, c.Keys.Private, msg); err != nil {
 		c.log.Warn("store message failed", "error", err)
 	}
@@ -178,7 +180,7 @@ func (c *Client) broadcastDelete(id string) {
 	})
 }
 
-func (c *Client) handleSignal(sig *signal.Signal, sess *Session, pubKey string) {
+func (c *Client) handleSignal(sig *signal.Signal, _ *Session, pubKey string) {
 	switch sig.Type {
 	case signal.TypeMessage:
 		if sig.From != pubKey {
@@ -190,10 +192,7 @@ func (c *Client) handleSignal(sig *signal.Signal, sess *Session, pubKey string) 
 			c.log.Warn("decode message failed", "error", msgErr)
 			return
 		}
-		if msg.From != sess.peerName() {
-			c.log.Warn("message from name mismatch")
-			return
-		}
+		msg.FromPubKey = pubKey
 		if _, putErr := message.Put(c.Store, c.Keys.Private, msg); putErr != nil {
 			c.log.Warn("store message failed", "error", putErr)
 		}
@@ -221,7 +220,7 @@ func (c *Client) handleSignal(sig *signal.Signal, sess *Session, pubKey string) 
 			c.log.Warn("delete signal pubkey mismatch")
 			return
 		}
-		if delErr := c.verifyAndDelete(sig, sess.peerName()); delErr != nil {
+		if delErr := c.verifyAndDelete(sig, pubKey); delErr != nil {
 			c.log.Warn("delete message failed", "error", delErr)
 		}
 
@@ -230,19 +229,19 @@ func (c *Client) handleSignal(sig *signal.Signal, sess *Session, pubKey string) 
 			c.log.Warn("update signal pubkey mismatch")
 			return
 		}
-		if updErr := c.verifyAndUpdate(sig, sess.peerName()); updErr != nil {
+		if updErr := c.verifyAndUpdate(sig, pubKey); updErr != nil {
 			c.log.Warn("update message failed", "error", updErr)
 		}
 	}
 }
 
-func (c *Client) verifyAndDelete(sig *signal.Signal, senderName string) error {
+func (c *Client) verifyAndDelete(sig *signal.Signal, pubKey string) error {
 	msg, err := message.Get(c.Store, c.Keys.Private, sig.ID)
 	if err != nil {
 		return fmt.Errorf("get for delete: %w", err)
 	}
-	if senderName != msg.From {
-		return fmt.Errorf("sender %q does not match message from %q", senderName, msg.From)
+	if msg.FromPubKey == "" || pubKey != msg.FromPubKey {
+		return errors.New("sender pubkey does not match message author")
 	}
 	if err = message.Delete(c.Store, c.Keys.Private, sig.ID); err != nil {
 		return fmt.Errorf("verify delete: %w", err)
@@ -250,13 +249,13 @@ func (c *Client) verifyAndDelete(sig *signal.Signal, senderName string) error {
 	return nil
 }
 
-func (c *Client) verifyAndUpdate(sig *signal.Signal, senderName string) error {
+func (c *Client) verifyAndUpdate(sig *signal.Signal, pubKey string) error {
 	msg, err := message.Get(c.Store, c.Keys.Private, sig.ID)
 	if err != nil {
 		return fmt.Errorf("get for update: %w", err)
 	}
-	if senderName != msg.From {
-		return fmt.Errorf("sender %q does not match message from %q", senderName, msg.From)
+	if msg.FromPubKey == "" || pubKey != msg.FromPubKey {
+		return errors.New("sender pubkey does not match message author")
 	}
 	msg.Content = string(sig.Content)
 	if err = message.Update(c.Store, c.Keys.Private, sig.ID, msg); err != nil {
