@@ -80,3 +80,51 @@ func TestParseNil(t *testing.T) {
 		t.Error("expected error for nil input")
 	}
 }
+
+func TestTypeFileMetaConstant(t *testing.T) {
+	if signal.TypeFileMeta != "file_meta" {
+		t.Errorf("TypeFileMeta = %q, want %q", signal.TypeFileMeta, "file_meta")
+	}
+}
+
+func TestNewFileMetaSignal(t *testing.T) {
+	meta := `{"name":"photo.jpg","size":12345,"mime":"image/jpeg"}`
+	data := signal.New(signal.TypeFileMeta, "alice", "file-uuid-1", []byte(meta))
+	parsed, err := signal.Parse(data)
+	if err != nil {
+		t.Fatal("Parse:", err)
+	}
+	if parsed.Type != "file_meta" {
+		t.Errorf("Type = %q, want %q", parsed.Type, "file_meta")
+	}
+	if parsed.From != "alice" {
+		t.Errorf("From = %q, want %q", parsed.From, "alice")
+	}
+	if parsed.ID != "file-uuid-1" {
+		t.Errorf("ID = %q, want %q", parsed.ID, "file-uuid-1")
+	}
+	if string(parsed.Content) != meta {
+		t.Errorf("Content = %q, want %q", string(parsed.Content), meta)
+	}
+}
+
+func TestTypeFileMetaNewRoundTrip(t *testing.T) {
+	meta := `{"name":"doc.pdf","size":999,"mime":"application/pdf"}`
+	data := signal.New(signal.TypeFileMeta, "bob", "abc-123", []byte(meta))
+	parsed, err := signal.Parse(data)
+	if err != nil {
+		t.Fatal("Parse:", err)
+	}
+	if parsed.Type != signal.TypeFileMeta {
+		t.Errorf("Type = %q, want %q", parsed.Type, signal.TypeFileMeta)
+	}
+	if parsed.From != "bob" {
+		t.Errorf("From = %q, want %q", parsed.From, "bob")
+	}
+	if parsed.ID != "abc-123" {
+		t.Errorf("ID = %q, want %q", parsed.ID, "abc-123")
+	}
+	if string(parsed.Content) != meta {
+		t.Errorf("Content = %q, want %q", string(parsed.Content), meta)
+	}
+}

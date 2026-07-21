@@ -1,6 +1,7 @@
 package client
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -124,7 +125,7 @@ func parseMessageForm(r *http.Request, maxSize int64) (string, []message.Attachm
 		if fe != nil {
 			return "", nil, errors.New("read file")
 		}
-		data, fe := io.ReadAll(f)
+		data, fe := io.ReadAll(io.LimitReader(f, maxSize-totalSize))
 		f.Close()
 		if fe != nil {
 			return "", nil, errors.New("read file")
@@ -132,7 +133,7 @@ func parseMessageForm(r *http.Request, maxSize int64) (string, []message.Attachm
 		atts = append(atts, message.Attachment{
 			Name:     fh.Filename,
 			MIMEType: fh.Header.Get("Content-Type"),
-			Size:     fh.Size,
+			Size:     int64(len(data)),
 			Data:     data,
 		})
 	}
@@ -197,13 +198,15 @@ func (c *Client) apiSendMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if haveFiles {
+		c.log.DebugContext(r.Context(), "api send files", "count", len(attachments), "msg_id", msg.ID)
 		for _, att := range attachments {
-			if err := c.sendFile(sess, att.ID, att.Data); err != nil {
-				c.log.WarnContext(r.Context(), "send file failed", "id", att.ID, "error", err)
+			fileReader := io.LimitReader(bytes.NewReader(att.Data), att.Size)
+			if sendErr := c.sendFile(sess, att.ID, att.Name, att.MIMEType, att.Size, fileReader); sendErr != nil {
+				c.log.WarnContext(r.Context(), "send file failed", "id", att.ID, "error", sendErr)
 			}
 		}
-		if err := message.StoreAttachments(c.Store, c.Keys.Private, msg.ID, attachments); err != nil {
-			c.log.WarnContext(r.Context(), "store attachments failed", "error", err)
+		if storeErr := message.StoreAttachments(c.Store, c.Keys.Private, msg.ID, attachments); storeErr != nil {
+			c.log.WarnContext(r.Context(), "store attachments failed", "error", storeErr)
 		}
 	}
 

@@ -290,3 +290,72 @@ func TestStoreRepeatedPutSameContent(t *testing.T) {
 		t.Errorf("values differ: %q vs %q", v1, v2)
 	}
 }
+
+func TestStoreIndexSearch(t *testing.T) {
+	dir := "test_idx_search"
+	s := store.New(dir)
+	defer os.Remove(dbPath(dir))
+
+	s.Chats.IndexSearch("msg-1", "alice", "bob", "hello world")
+	s.Chats.IndexSearch("msg-2", "charlie", "dave", "golang programming")
+	s.Chats.IndexSearch("msg-3", "alice", "bob", "hello again")
+
+	ids, err := s.Chats.Search("hello", 10)
+	if err != nil {
+		t.Fatal("Search:", err)
+	}
+	if len(ids) != 2 {
+		t.Errorf("expected 2 results for 'hello', got %d", len(ids))
+	}
+
+	ids, err = s.Chats.Search("alice", 10)
+	if err != nil {
+		t.Fatal("Search:", err)
+	}
+	if len(ids) != 2 {
+		t.Errorf("expected 2 results for 'alice', got %d", len(ids))
+	}
+
+	ids, err = s.Chats.Search("zzzz", 10)
+	if err != nil {
+		t.Fatal("Search:", err)
+	}
+	if len(ids) != 0 {
+		t.Errorf("expected 0 results for 'zzzz', got %d", len(ids))
+	}
+}
+
+func TestStoreIndexSearchLimit(t *testing.T) {
+	dir := "test_idx_search_lim"
+	s := store.New(dir)
+	defer os.Remove(dbPath(dir))
+
+	s.Chats.IndexSearch("m1", "a", "b", "match this")
+	s.Chats.IndexSearch("m2", "c", "d", "match that")
+	s.Chats.IndexSearch("m3", "e", "f", "match too")
+
+	ids, err := s.Chats.Search("match", 2)
+	if err != nil {
+		t.Fatal("Search:", err)
+	}
+	if len(ids) > 2 {
+		t.Errorf("expected at most 2 results with limit 2, got %d", len(ids))
+	}
+}
+
+func TestStoreIndexDelete(t *testing.T) {
+	dir := "test_idx_del"
+	s := store.New(dir)
+	defer os.Remove(dbPath(dir))
+
+	s.Chats.IndexSearch("msg-del", "alice", "bob", "delete me")
+	s.Chats.Delete("msg-del")
+
+	ids, err := s.Chats.Search("delete", 10)
+	if err != nil {
+		t.Fatal("Search:", err)
+	}
+	if len(ids) != 0 {
+		t.Errorf("expected 0 results after delete, got %d", len(ids))
+	}
+}

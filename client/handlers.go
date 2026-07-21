@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/JspBack/end-to-end-chat/signal"
 	"github.com/JspBack/end-to-end-chat/store"
 	"github.com/gorilla/websocket"
 )
@@ -182,21 +181,6 @@ func (c *Client) recvLoop(ctx context.Context, sess *Session, pubKey string) {
 			continue
 		}
 
-		if !sess.msgLimiter.Allow() {
-			c.log.WarnContext(ctx, "rate limit exceeded, dropping message", "remote", sess.conn.RemoteAddr())
-			continue
-		}
-
-		if sess.status() != store.PeerStatusAccepted {
-			continue
-		}
-
-		sig, parseErr := signal.Parse(plain)
-		if parseErr != nil {
-			c.log.WarnContext(ctx, "decode envelope failed", "error", parseErr)
-			continue
-		}
-
-		c.handleSignal(sig, sess, pubKey)
+		c.handleDecrypted(plain, sess, pubKey)
 	}
 }

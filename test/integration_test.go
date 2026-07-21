@@ -419,24 +419,21 @@ func TestMessageDeleteRemovesFiles(t *testing.T) {
 		t.Fatal("Put:", err)
 	}
 
-	files, err := s.Files.ListByMessage(id)
+	fileID := msg.Attachments[0].ID
+	raw, err := s.Files.Get("secret", fileID)
 	if err != nil {
-		t.Fatal("ListByMessage:", err)
+		t.Fatalf("Files.Get before delete: %v", err)
 	}
-	if len(files) != 1 {
-		t.Fatalf("expected 1 file, got %d", len(files))
+	if len(raw) == 0 {
+		t.Fatal("expected non-empty file data")
 	}
 
 	if err = message.Delete(s, "secret", id); err != nil {
 		t.Fatal("Delete:", err)
 	}
 
-	files, err = s.Files.ListByMessage(id)
-	if err != nil {
-		t.Fatal("ListByMessage after delete:", err)
-	}
-	if len(files) != 0 {
-		t.Errorf("expected 0 files after delete, got %d", len(files))
+	if _, err = s.Files.Get("secret", fileID); !os.IsNotExist(err) {
+		t.Errorf("expected file to be deleted, got err=%v", err)
 	}
 }
 
@@ -510,12 +507,8 @@ func TestStoreAttachmentsEmptyData(t *testing.T) {
 	if got.Attachments[0].Name != "empty.bin" {
 		t.Errorf("Name = %q", got.Attachments[0].Name)
 	}
-	files, err := s.Files.ListByMessage(msg.ID)
-	if err != nil {
-		t.Fatal("ListByMessage:", err)
-	}
-	if len(files) != 0 {
-		t.Errorf("expected 0 files for empty data, got %d", len(files))
+	if got.Attachments[0].ID != "" {
+		t.Errorf("expected empty ID for empty-data attachment, got %q", got.Attachments[0].ID)
 	}
 }
 

@@ -40,12 +40,8 @@ func (t *ChatStore) PutWithID(id, value, secret string) error {
 	if _, err = t.db.ExecContext(context.Background(), q, id, encrypted, now); err != nil {
 		return fmt.Errorf("store: put: %w", err)
 	}
-	t.cacheDelete(id)
-	return nil
-}
-
-func (t *ChatStore) cacheDelete(id string) {
 	t.cache.Delete(id)
+	return nil
 }
 
 func (t *ChatStore) CacheStore(id, decrypted string) {
@@ -161,6 +157,6 @@ func (t *ChatStore) Delete(id string) error {
 		return fmt.Errorf("store: delete: %w", err)
 	}
 	_ = t.deleteSearchIndex(id)
-	t.cacheDelete(id)
+	t.cache.Delete(id)
 	return nil
 }
