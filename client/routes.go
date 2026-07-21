@@ -35,4 +35,5 @@ func (c *Client) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/messages/search", c.localhostOnly(c.apiSearchMessages))
 	mux.HandleFunc("PUT /api/messages/{id}", c.localhostOnly(c.apiUpdateMessage))
 	mux.HandleFunc("DELETE /api/messages/{id}", c.localhostOnly(c.apiDeleteMessage))
+	mux.HandleFunc("GET /api/files/{id}", c.localhostOnly(c.apiGetFile))
 }

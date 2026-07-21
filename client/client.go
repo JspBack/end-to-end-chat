@@ -136,10 +136,8 @@ func (c *Client) Shutdown() {
 	}
 }
 
-func (c *Client) sendMessage(sess *Session, content string) error {
-	msg := message.Message{From: c.Name, To: sess.peerName(), Content: content, Time: time.Now().Format(time.RFC3339)}
-
-	if _, err := message.Put(c.Store, c.Keys.Private, &msg); err != nil {
+func (c *Client) sendMessage(sess *Session, msg *message.Message) error {
+	if _, err := message.Put(c.Store, c.Keys.Private, msg); err != nil {
 		c.log.Warn("store message failed", "error", err)
 	}
 
@@ -147,13 +145,20 @@ func (c *Client) sendMessage(sess *Session, content string) error {
 	if err != nil {
 		return fmt.Errorf("encode message: %w", err)
 	}
-	return sess.send(signal.New(signal.TypeMessage, c.Keys.Public, "", string(payload)))
+	return sess.send(signal.New(signal.TypeMessage, c.Keys.Public, "", payload))
+}
+
+func (c *Client) sendFile(sess *Session, id string, data []byte) error {
+	return sess.send(signal.New(signal.TypeFile, c.Keys.Public, id, data))
 }
 
 func (c *Client) sendToAll(content string) {
+	now := time.Now().Format(time.RFC3339)
 	c.sessions.Range(func(_, value interface{}) bool {
 		if sess, ok := value.(*Session); ok {
-			if err := c.sendMessage(sess, content); err != nil {
+			msg := message.NewMessage(c.Name, sess.peerName(), content)
+			msg.Time = now
+			if err := c.sendMessage(sess, msg); err != nil {
 				c.log.Warn("send to session", "peer", sess.peerName(), "error", err)
 			}
 		}
@@ -162,7 +167,7 @@ func (c *Client) sendToAll(content string) {
 }
 
 func (c *Client) broadcastDelete(id string) {
-	payload := signal.New(signal.TypeDelete, c.Keys.Public, id, "")
+	payload := signal.New(signal.TypeDelete, c.Keys.Public, id, nil)
 	c.sessions.Range(func(_, value interface{}) bool {
 		if sess, ok := value.(*Session); ok {
 			if err := sess.send(payload); err != nil {
@@ -180,7 +185,7 @@ func (c *Client) handleSignal(sig *signal.Signal, sess *Session, pubKey string) 
 			c.log.Warn("message signal pubkey mismatch")
 			return
 		}
-		msg, msgErr := message.ToMessage([]byte(sig.Content))
+		msg, msgErr := message.ToMessage(sig.Content)
 		if msgErr != nil {
 			c.log.Warn("decode message failed", "error", msgErr)
 			return
@@ -195,6 +200,20 @@ func (c *Client) handleSignal(sig *signal.Signal, sess *Session, pubKey string) 
 		if msg.To == c.Name {
 			c.log.Debug("message received",
 				"from", msg.From, "to", msg.To, "content", msg.Content)
+		}
+
+	case signal.TypeFile:
+		if sig.From != pubKey {
+			c.log.Warn("file signal pubkey mismatch")
+			return
+		}
+		if sig.ID == "" || len(sig.Content) == 0 {
+			c.log.Warn("file signal missing id or data")
+			return
+		}
+		att := message.Attachment{ID: sig.ID, Data: sig.Content}
+		if storeErr := message.StoreAttachments(c.Store, c.Keys.Private, "", []message.Attachment{att}); storeErr != nil {
+			c.log.Warn("store file failed", "error", storeErr)
 		}
 
 	case signal.TypeDelete:
@@ -225,7 +244,7 @@ func (c *Client) verifyAndDelete(sig *signal.Signal, senderName string) error {
 	if senderName != msg.From {
 		return fmt.Errorf("sender %q does not match message from %q", senderName, msg.From)
 	}
-	if err = message.Delete(c.Store, sig.ID); err != nil {
+	if err = message.Delete(c.Store, c.Keys.Private, sig.ID); err != nil {
 		return fmt.Errorf("verify delete: %w", err)
 	}
 	return nil
@@ -239,7 +258,7 @@ func (c *Client) verifyAndUpdate(sig *signal.Signal, senderName string) error {
 	if senderName != msg.From {
 		return fmt.Errorf("sender %q does not match message from %q", senderName, msg.From)
 	}
-	msg.Content = sig.Content
+	msg.Content = string(sig.Content)
 	if err = message.Update(c.Store, c.Keys.Private, sig.ID, msg); err != nil {
 		return fmt.Errorf("verify update: %w", err)
 	}
@@ -247,7 +266,7 @@ func (c *Client) verifyAndUpdate(sig *signal.Signal, senderName string) error {
 }
 
 func (c *Client) broadcastUpdate(id, content string) {
-	payload := signal.New(signal.TypeUpdate, c.Keys.Public, id, content)
+	payload := signal.New(signal.TypeUpdate, c.Keys.Public, id, []byte(content))
 	c.sessions.Range(func(_, value interface{}) bool {
 		if sess, ok := value.(*Session); ok {
 			if err := sess.send(payload); err != nil {

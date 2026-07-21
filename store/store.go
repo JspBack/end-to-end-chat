@@ -21,6 +21,7 @@ import (
 type Store struct {
 	Chats      *ChatStore
 	KnownPeers *KnownPeerStore
+	Files      *FileStore
 }
 
 func New(dir string) *Store {
@@ -41,6 +42,7 @@ func New(dir string) *Store {
 	for _, q := range []string{
 		"CREATE TABLE IF NOT EXISTS chats (id TEXT PRIMARY KEY, value TEXT, created_at TEXT)",
 		"CREATE TABLE IF NOT EXISTS known_peers (pub_key TEXT PRIMARY KEY, peer_ip TEXT, status TEXT)",
+		"CREATE TABLE IF NOT EXISTS files (id TEXT PRIMARY KEY, data BLOB, msg_id TEXT, created_at TEXT)",
 	} {
 		if _, err = db.ExecContext(ctx, q); err != nil {
 			panic(fmt.Errorf("store: create table: %w", err))
@@ -50,6 +52,7 @@ func New(dir string) *Store {
 	return &Store{
 		Chats:      &ChatStore{db: db},
 		KnownPeers: &KnownPeerStore{db: db},
+		Files:      &FileStore{db: db},
 	}
 }
 
@@ -58,27 +61,23 @@ func aesKey(secret string) []byte {
 	return h[:32]
 }
 
-func encrypt(secret string, plain []byte) (string, error) {
+func encryptRaw(secret string, plain []byte) ([]byte, error) {
 	block, err := aes.NewCipher(aesKey(secret))
 	if err != nil {
-		return "", fmt.Errorf("store: new cipher: %w", err)
+		return nil, fmt.Errorf("store: new cipher: %w", err)
 	}
 	gcm, err := cipher.NewGCM(block)
 	if err != nil {
-		return "", fmt.Errorf("store: new gcm: %w", err)
+		return nil, fmt.Errorf("store: new gcm: %w", err)
 	}
 	nonce := make([]byte, gcm.NonceSize())
 	if _, err = rand.Read(nonce); err != nil {
-		return "", fmt.Errorf("store: random nonce: %w", err)
+		return nil, fmt.Errorf("store: random nonce: %w", err)
 	}
-	return base64.StdEncoding.EncodeToString(gcm.Seal(nonce, nonce, plain, nil)), nil
+	return gcm.Seal(nonce, nonce, plain, nil), nil
 }
 
-func decrypt(secret, data string) ([]byte, error) {
-	ciphertext, err := base64.StdEncoding.DecodeString(data)
-	if err != nil {
-		return nil, fmt.Errorf("store: decode base64: %w", err)
-	}
+func decryptRaw(secret string, data []byte) ([]byte, error) {
 	block, err := aes.NewCipher(aesKey(secret))
 	if err != nil {
 		return nil, fmt.Errorf("store: new cipher: %w", err)
@@ -88,12 +87,28 @@ func decrypt(secret, data string) ([]byte, error) {
 		return nil, fmt.Errorf("store: new gcm: %w", err)
 	}
 	n := gcm.NonceSize()
-	if len(ciphertext) < n {
+	if len(data) < n {
 		return nil, errors.New("store: invalid ciphertext")
 	}
-	plain, err := gcm.Open(nil, ciphertext[:n], ciphertext[n:], nil)
+	plain, err := gcm.Open(nil, data[:n], data[n:], nil)
 	if err != nil {
 		return nil, fmt.Errorf("store: open: %w", err)
 	}
 	return plain, nil
+}
+
+func encrypt(secret string, plain []byte) (string, error) {
+	raw, err := encryptRaw(secret, plain)
+	if err != nil {
+		return "", err
+	}
+	return base64.StdEncoding.EncodeToString(raw), nil
+}
+
+func decrypt(secret, data string) ([]byte, error) {
+	raw, err := base64.StdEncoding.DecodeString(data)
+	if err != nil {
+		return nil, fmt.Errorf("store: decode base64: %w", err)
+	}
+	return decryptRaw(secret, raw)
 }

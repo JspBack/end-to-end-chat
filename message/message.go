@@ -7,7 +7,27 @@ import (
 	"time"
 
 	"github.com/JspBack/end-to-end-chat/store"
+	"github.com/google/uuid"
 )
+
+func StoreAttachments(s *store.Store, secret, msgID string, attachments []Attachment) error {
+	for i := range attachments {
+		if len(attachments[i].Data) == 0 {
+			continue
+		}
+		id := attachments[i].ID
+		if id == "" {
+			id = uuid.New().String()
+		}
+		if err := s.Files.PutWithID(secret, id, msgID, attachments[i].Data); err != nil {
+			return fmt.Errorf("message: store attachment: %w", err)
+		}
+		attachments[i].ID = id
+		attachments[i].Size = int64(len(attachments[i].Data))
+		attachments[i].Data = nil
+	}
+	return nil
+}
 
 func Search(s *store.Store, secret, query string, limit int) ([]Message, error) {
 	if query == "" {
@@ -26,9 +46,18 @@ func Search(s *store.Store, secret, query string, limit int) ([]Message, error) 
 		if e != nil {
 			continue
 		}
-		if !strings.Contains(strings.ToLower(msg.Content), q) &&
-			!strings.Contains(strings.ToLower(msg.From), q) &&
-			!strings.Contains(strings.ToLower(msg.To), q) {
+		matched := strings.Contains(strings.ToLower(msg.Content), q) ||
+			strings.Contains(strings.ToLower(msg.From), q) ||
+			strings.Contains(strings.ToLower(msg.To), q)
+		if !matched {
+			for _, a := range msg.Attachments {
+				if strings.Contains(strings.ToLower(a.Name), q) {
+					matched = true
+					break
+				}
+			}
+		}
+		if !matched {
 			continue
 		}
 		out = append(out, *msg)
@@ -39,16 +68,25 @@ func Search(s *store.Store, secret, query string, limit int) ([]Message, error) 
 	return out, nil
 }
 
-type Message struct {
-	ID      string `json:"id,omitempty"`
-	From    string `json:"from"`
-	To      string `json:"to"`
-	Content string `json:"content"`
-	Time    string `json:"time"`
+type Attachment struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	MIMEType string `json:"mime_type"`
+	Size     int64  `json:"size"`
+	Data     []byte `json:"data,omitempty"`
 }
 
-func NewMessage(from, to, content string) *Message {
-	return &Message{From: from, To: to, Content: content, Time: time.Now().Format(time.RFC3339)}
+type Message struct {
+	ID          string       `json:"id,omitempty"`
+	From        string       `json:"from"`
+	To          string       `json:"to"`
+	Content     string       `json:"content"`
+	Time        string       `json:"time"`
+	Attachments []Attachment `json:"attachments,omitempty"`
+}
+
+func NewMessage(from, to, content string, attachments ...Attachment) *Message {
+	return &Message{From: from, To: to, Content: content, Time: time.Now().Format(time.RFC3339), Attachments: attachments}
 }
 
 func (m *Message) Encode() ([]byte, error) {
@@ -121,7 +159,22 @@ func Update(s *store.Store, secret, id string, msg *Message) error {
 	return nil
 }
 
-func Delete(s *store.Store, id string) error {
+func Delete(s *store.Store, secret, id string) error {
+	if cached, ok := s.Chats.CacheLoad(id); ok {
+		var msg Message
+		if err := json.Unmarshal([]byte(cached), &msg); err == nil {
+			for _, a := range msg.Attachments {
+				_ = s.Files.Delete(a.ID)
+			}
+		}
+	} else if plain, getErr := s.Chats.Get(id, secret); getErr == nil {
+		var msg Message
+		if err := json.Unmarshal([]byte(plain), &msg); err == nil {
+			for _, a := range msg.Attachments {
+				_ = s.Files.Delete(a.ID)
+			}
+		}
+	}
 	if err := s.Chats.Delete(id); err != nil {
 		return fmt.Errorf("message: store delete: %w", err)
 	}
