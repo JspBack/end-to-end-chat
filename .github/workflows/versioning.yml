@@ -34,7 +34,7 @@ jobs:
 
       - name: run go test
         id: test
-        run: go test -json ./... -count=1 -coverprofile=coverage.out > test-results.json
+        run: go test -json -coverpkg=./... ./test/... -count=1 -coverprofile=coverage.out > test-results.json
 
       - name: Publish Test Report
         uses: robherley/go-test-action@v1
