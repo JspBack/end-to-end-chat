@@ -2,8 +2,12 @@ package client
 
 import (
 	"encoding/json"
+	"errors"
+	"net"
 	"net/http"
+	"strconv"
 
+	"github.com/JspBack/end-to-end-chat/config"
 	"github.com/JspBack/end-to-end-chat/message"
 	"github.com/JspBack/end-to-end-chat/store"
 )
@@ -148,6 +152,21 @@ func (c *Client) apiSendMessage(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(statusResponse{Status: "sent"})
 }
 
+func validateAddr(addr string) (string, error) {
+	if addr == "" || addr == ":" {
+		return "", errors.New("invalid address")
+	}
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		host = addr
+		port = strconv.Itoa(config.DefaultPort)
+	}
+	if port == "" {
+		port = strconv.Itoa(config.DefaultPort)
+	}
+	return net.JoinHostPort(host, port), nil
+}
+
 func (c *Client) apiConnectPeer(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Addr string `json:"addr"`
@@ -156,13 +175,15 @@ func (c *Client) apiConnectPeer(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid body\n", http.StatusBadRequest)
 		return
 	}
-	if err := validateAddr(req.Addr); err != nil {
+
+	addr, err := validateAddr(req.Addr)
+	if err != nil {
 		http.Error(w, err.Error()+"\n", http.StatusBadRequest)
 		return
 	}
 
-	if err := c.connectSession(r.Context(), req.Addr); err != nil {
-		c.log.WarnContext(r.Context(), "connect peer", "addr", req.Addr, "error", err)
+	if err = c.connectSession(r.Context(), addr); err != nil {
+		c.log.WarnContext(r.Context(), "connect peer", "addr", addr, "error", err)
 		http.Error(w, err.Error()+"\n", http.StatusBadGateway)
 		return
 	}
