@@ -44,7 +44,7 @@ td button { margin: 0 2px; padding: 4px 8px; font-size: 0.75rem; }
   <h2>My Profile</h2>
   <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
     <div id="profile-pic-preview" style="width:64px;height:64px;border-radius:50%;background:#e0e0e0;overflow:hidden;flex-shrink:0;">
-      <img id="profile-pic-img" style="width:100%;height:100%;object-fit:cover;display:none;">
+      <img id="profile-pic-img" alt="Profile pic" style="width:100%;height:100%;object-fit:cover;display:none;">
     </div>
     <div style="display:flex;flex-direction:column;gap:8px;">
       <div style="display:flex;align-items:center;gap:8px;">
@@ -154,10 +154,10 @@ async function loadMessages() {
 }
 async function viewMessage(id) {
   const msg = await api(`/api/messages/${id}`);
-  const attHtml = msg.attachments && msg.attachments.length
-    ? '<div style="margin:8px 0"><b>Attachments:</b><ul>' + msg.attachments.map(a =>
+  const attHtml = msg.attachments?.length
+    ? `<div style="margin:8px 0"><b>Attachments:</b><ul>${msg.attachments.map(a =>
         `<li><a href="/api/files/${a.id}" download="${escapeHtml(a.name)}"><button type="button">${escapeHtml(a.name)}</button></a></li>`
-      ).join('') + '</ul></div>'
+      ).join('')}</ul></div>`
     : '';
   const detail = document.getElementById('message-detail');
   detail.innerHTML = `<pre>${JSON.stringify(msg, null, 2)}</pre>${attHtml}
@@ -171,10 +171,10 @@ async function updateMessage(id) {
     const r = await api(`/api/messages/${id}`, { method: 'PUT', body: JSON.stringify({ content }) });
     document.getElementById('message-detail').innerHTML = `<pre>${JSON.stringify(r)}</pre>`;
     loadMessages();
-  } catch (e) { document.getElementById('message-detail').textContent = 'error: ' + e.message; }
+  } catch (e) { document.getElementById('message-detail').textContent = `error: ${e.message}`; }
 }
 async function deleteMessage(id) {
-  if (!confirm('delete message ' + id + '?')) return;
+  if (!confirm(`delete message ${id}?`)) return;
   try {
     const r = await api(`/api/messages/${id}`, { method: 'DELETE' });
     loadMessages();
@@ -187,7 +187,7 @@ async function connectPeer() {
     const r = await api('/api/peers/connect', { method: 'POST', body: JSON.stringify({ addr }) });
     document.getElementById('connect-result').textContent = JSON.stringify(r);
     setTimeout(loadPeers, 500);
-  } catch (e) { document.getElementById('connect-result').textContent = 'error: ' + e.message; }
+  } catch (e) { document.getElementById('connect-result').textContent = `error: ${e.message}`; }
 }
 async function sendMessage() {
   const pk = document.getElementById('send-pubkey').value;
@@ -205,7 +205,7 @@ async function sendMessage() {
     document.getElementById('send-content').value = '';
     fileInput.value = '';
     loadMessages();
-  } catch (e) { document.getElementById('send-result').textContent = 'error: ' + e.message; }
+  } catch (e) { document.getElementById('send-result').textContent = `error: ${e.message}`; }
 }
 async function searchMessages() {
   const q = document.getElementById('search-q').value;
@@ -214,12 +214,12 @@ async function searchMessages() {
     const data = await api(`/api/messages/search?q=${encodeURIComponent(q)}`);
     document.getElementById('search-result').textContent = data.length
       ? data.map((m,i) => {
-          const att = m.attachments && m.attachments.length
-            ? ' [attachments: ' + m.attachments.map(a => a.name).join(', ') + ']' : '';
+          const att = m.attachments?.length
+            ? ` [attachments: ${m.attachments.map(a => a.name).join(', ')}]` : '';
           return `${i+1}. from=${m.from} to=${m.to} content=${m.content}${att} time=${m.time}`;
         }).join('\n')
       : 'no results';
-  } catch (e) { document.getElementById('search-result').textContent = 'error: ' + e.message; }
+  } catch (e) { document.getElementById('search-result').textContent = `error: ${e.message}`; }
 }
 async function loadOutbox() {
   const data = await api('/admin/outbox') || [];
@@ -243,21 +243,21 @@ async function flushOutbox(pk) {
   } catch (e) { alert(e.message); }
 }
 async function deleteOutboxEntry(id) {
-  if (!confirm('remove outbox entry ' + id + '?')) return;
+  if (!confirm(`remove outbox entry ${id}?`)) return;
   try {
     const r = await api(`/admin/outbox/${id}`, { method: 'DELETE' });
     loadOutbox();
   } catch (e) { alert(e.message); }
 }
 async function setNickname(pk) {
-  const nickname = document.getElementById('nick-' + pk).value;
+  const nickname = document.getElementById(`nick-${pk}`).value;
   try {
-    await api('/admin/peers/' + pk + '/nickname', { method: 'PUT', body: JSON.stringify({ nickname }) });
+    await api(`/admin/peers/${pk}/nickname`, { method: 'PUT', body: JSON.stringify({ nickname }) });
     loadPeers();
   } catch (e) { alert(e.message); }
 }
 async function disconnectSession(pk) {
-  if (!confirm('disconnect session ' + pk.slice(0,12) + '...?')) return;
+  if (!confirm(`disconnect session ${pk.slice(0,12)}...?`)) return;
   try {
     const r = await api(`/admin/sessions/${pk}`, { method: 'DELETE' });
     loadSessions();
