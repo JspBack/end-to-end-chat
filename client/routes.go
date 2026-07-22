@@ -28,6 +28,7 @@ func (c *Client) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /admin/peers/{pubKey}/accept", c.localhostOnly(c.adminAcceptPeer))
 	mux.HandleFunc("PUT /admin/peers/{pubKey}/reject", c.localhostOnly(c.adminRejectPeer))
 	mux.HandleFunc("GET /admin/sessions", c.localhostOnly(c.adminListSessions))
+	mux.HandleFunc("DELETE /admin/sessions/{pubKey}", c.localhostOnly(c.adminDeleteSession))
 	mux.HandleFunc("POST /api/peers/connect", c.localhostOnly(c.apiConnectPeer))
 	mux.HandleFunc("POST /api/messages/{pubKey}", c.localhostOnly(c.apiSendMessage))
 	mux.HandleFunc("GET /api/messages", c.localhostOnly(c.apiListMessages))

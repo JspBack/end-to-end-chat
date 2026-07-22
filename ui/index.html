@@ -46,7 +46,7 @@ td button { margin: 0 2px; padding: 4px 8px; font-size: 0.75rem; }
 
 <div class="section section-sessions">
   <h2>Sessions</h2>
-  <table><thead><tr><th>pubkey</th><th>name</th><th>status</th></tr></thead><tbody id="sessions"></tbody></table>
+  <table><thead><tr><th>pubkey</th><th>name</th><th>status</th><th></th></tr></thead><tbody id="sessions"></tbody></table>
 </div>
 
 <div class="section section-connect">
@@ -95,7 +95,7 @@ async function loadPeers() {
   const data = await api('/admin/peers') || [];
   document.getElementById('peers').innerHTML = data.map(p => `<tr>
     <td>${p.pub_key}</td><td>${p.peer_ip}</td><td><span class="badge badge-${p.status}">${p.status}</span></td>
-    <td>
+    <td colspan="2">
       <button type="button" class="btn-success" onclick="updatePeer('${p.pub_key}','accept')">accept</button>
       <button type="button" class="btn-danger" onclick="updatePeer('${p.pub_key}','reject')">reject</button>
     </td>
@@ -109,6 +109,7 @@ async function loadSessions() {
   const data = await api('/admin/sessions') || [];
   document.getElementById('sessions').innerHTML = data.map(s => `<tr>
     <td>${s.pub_key}</td><td>${s.name || '-'}</td><td><span class="badge badge-${s.status}">${s.status}</span></td>
+    <td><button type="button" class="btn-danger" onclick="disconnectSession('${s.pub_key}')">disconnect</button></td>
   </tr>`).join('');
 }
 async function loadMessages() {
@@ -218,6 +219,13 @@ async function deleteOutboxEntry(id) {
     loadOutbox();
   } catch (e) { alert(e.message); }
 }
+async function disconnectSession(pk) {
+  if (!confirm('disconnect session ' + pk.slice(0,12) + '...?')) return;
+  try {
+    const r = await api(`/admin/sessions/${pk}`, { method: 'DELETE' });
+    loadSessions();
+  } catch (e) { alert(e.message); }
+}
 async function refreshAll() {
   await Promise.all([loadPeers(), loadSessions(), loadOutbox(), loadMessages()]);
 }
@@ -231,6 +239,7 @@ window.updateMessage = updateMessage;
 window.deleteMessage = deleteMessage;
 window.flushOutbox = flushOutbox;
 window.deleteOutboxEntry = deleteOutboxEntry;
+window.disconnectSession = disconnectSession;
 window.refreshAll = refreshAll;
 refreshAll();
 setInterval(refreshAll, 5000);

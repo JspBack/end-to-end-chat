@@ -19,6 +19,14 @@ import (
 
 var errNotOwner = errors.New("not the message owner")
 
+const (
+	statusConnected    = "connected"
+	statusDisconnected = "disconnected"
+	statusDeleted      = "deleted"
+	statusUpdated      = "updated"
+	statusFlushed      = "flushed"
+)
+
 type statusResponse struct {
 	Status string `json:"status"`
 }
@@ -112,23 +120,41 @@ func (c *Client) adminListSessions(w http.ResponseWriter, _ *http.Request) {
 	_ = json.NewEncoder(w).Encode(out)
 }
 
+func (c *Client) adminDeleteSession(w http.ResponseWriter, r *http.Request) {
+	pubKey := r.PathValue("pubKey")
+	if pubKey == "" {
+		http.Error(w, "missing pubKey\n", http.StatusBadRequest)
+		return
+	}
+	v, loaded := c.sessions.LoadAndDelete(pubKey)
+	if !loaded {
+		http.Error(w, "session not found\n", http.StatusNotFound)
+		return
+	}
+	if sess, ok := v.(*Session); ok {
+		_ = sess.closeConn()
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(statusResponse{Status: statusDisconnected})
+}
+
 func parseMessageForm(r *http.Request, maxSize int64) (string, []message.Attachment, error) {
-	if err := r.ParseMultipartForm(maxSize); err != nil {
+	if err := r.ParseMultipartForm(config.MultipartMemBuf); err != nil {
 		return "", nil, errors.New("invalid form")
 	}
 	content := r.FormValue("content")
 	var atts []message.Attachment
 	var totalSize int64
 	for _, fh := range r.MultipartForm.File["files"] {
-		totalSize += fh.Size
-		if totalSize > maxSize {
+		if totalSize+fh.Size > maxSize {
 			return "", nil, fmt.Errorf("attachments exceed max size %d", maxSize)
 		}
+		totalSize += fh.Size
 		f, fe := fh.Open()
 		if fe != nil {
 			return "", nil, errors.New("read file")
 		}
-		data, fe := io.ReadAll(io.LimitReader(f, maxSize-totalSize))
+		data, fe := io.ReadAll(io.LimitReader(f, maxSize))
 		f.Close()
 		if fe != nil {
 			return "", nil, errors.New("read file")
@@ -280,7 +306,7 @@ func (c *Client) apiConnectPeer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(statusResponse{Status: "connected"})
+	_ = json.NewEncoder(w).Encode(statusResponse{Status: statusConnected})
 }
 
 func (c *Client) apiListMessages(w http.ResponseWriter, _ *http.Request) {
@@ -382,7 +408,7 @@ func (c *Client) apiUpdateMessage(w http.ResponseWriter, r *http.Request) {
 	c.broadcastUpdate(id, req.Content)
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(statusResponse{Status: "updated"})
+	_ = json.NewEncoder(w).Encode(statusResponse{Status: statusUpdated})
 }
 
 func (c *Client) apiDeleteMessage(w http.ResponseWriter, r *http.Request) {
@@ -410,7 +436,7 @@ func (c *Client) apiDeleteMessage(w http.ResponseWriter, r *http.Request) {
 	c.broadcastDelete(id)
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(statusResponse{Status: "deleted"})
+	_ = json.NewEncoder(w).Encode(statusResponse{Status: statusDeleted})
 }
 
 func (c *Client) apiGetFile(w http.ResponseWriter, r *http.Request) {
@@ -455,7 +481,7 @@ func (c *Client) adminDeleteOutboxEntry(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(statusResponse{Status: "deleted"})
+	_ = json.NewEncoder(w).Encode(statusResponse{Status: statusDeleted})
 }
 
 func (c *Client) adminFlushOutbox(w http.ResponseWriter, r *http.Request) {
@@ -466,5 +492,5 @@ func (c *Client) adminFlushOutbox(w http.ResponseWriter, r *http.Request) {
 	}
 	c.flushOutbox(pubKey)
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(statusResponse{Status: "flushed"})
+	_ = json.NewEncoder(w).Encode(statusResponse{Status: statusFlushed})
 }

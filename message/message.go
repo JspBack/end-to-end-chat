@@ -129,6 +129,7 @@ func Get(s *store.Store, secret, id string) (*Message, error) {
 		if err := json.Unmarshal([]byte(cached), &msg); err != nil {
 			return nil, fmt.Errorf("message: unmarshal: %w", err)
 		}
+		msg.ID = id
 		return &msg, nil
 	}
 	plain, err := s.Chats.Get(id, secret)
@@ -139,6 +140,7 @@ func Get(s *store.Store, secret, id string) (*Message, error) {
 	if err = json.Unmarshal([]byte(plain), &msg); err != nil {
 		return nil, fmt.Errorf("message: unmarshal: %w", err)
 	}
+	msg.ID = id
 	s.Chats.CacheStore(id, plain)
 	return &msg, nil
 }

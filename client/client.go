@@ -23,11 +23,6 @@ import (
 	"github.com/go-chi/httprate"
 )
 
-const (
-	fileChunkSize = 256 << 10
-	fileIDLen     = 36
-)
-
 type fileMeta struct {
 	Name string `json:"name"`
 	Size int64  `json:"size"`
@@ -138,14 +133,14 @@ func (c *Client) sendFile(sess *Session, id, name, mimeType string, size int64, 
 	if err := sess.send(signal.New(signal.TypeFileMeta, c.Keys.Public, id, metaRaw)); err != nil {
 		return fmt.Errorf("send file meta: %w", err)
 	}
-	buf := make([]byte, fileChunkSize)
+	buf := make([]byte, config.FileChunkSize)
 	var sent int64
 	for {
 		n, err := data.Read(buf)
 		if n > 0 {
-			plain := make([]byte, fileIDLen+n)
+			plain := make([]byte, config.FileIDLen+n)
 			copy(plain, []byte(id))
-			copy(plain[fileIDLen:], buf[:n])
+			copy(plain[config.FileIDLen:], buf[:n])
 			if sendErr := sess.send(plain); sendErr != nil {
 				return fmt.Errorf("send file chunk: %w", sendErr)
 			}
@@ -305,12 +300,12 @@ func (c *Client) handleSignal(sig *signal.Signal, pubKey string) {
 }
 
 func (c *Client) handleFileChunk(plain []byte) {
-	if len(plain) < fileIDLen {
+	if len(plain) < config.FileIDLen {
 		c.log.Warn("file chunk too short")
 		return
 	}
-	id := string(plain[:fileIDLen])
-	data := plain[fileIDLen:]
+	id := string(plain[:config.FileIDLen])
+	data := plain[config.FileIDLen:]
 
 	c.pendingMu.Lock()
 	pf, ok := c.pendingFiles[id]

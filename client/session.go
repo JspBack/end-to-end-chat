@@ -17,17 +17,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/JspBack/end-to-end-chat/config"
 	"github.com/JspBack/end-to-end-chat/keys"
+	"github.com/JspBack/end-to-end-chat/signal"
 	"github.com/gorilla/websocket"
 )
 
-const (
-	keyExchangeType = "key_exchange"
-	nonceSize       = 12
-)
-
-type keyExchangeMsg struct {
-	Type         string `json:"type"`
+type keyExchangeData struct {
 	PubKey       string `json:"pub_key"`
 	StaticPubKey string `json:"static_pub_key"`
 	ClientName   string `json:"client_name"`
@@ -69,38 +65,46 @@ func newSession(
 }
 
 func (s *Session) doSend(ourEphemeralHex string, sig []byte) error {
-	raw, _ := json.Marshal(keyExchangeMsg{
-		Type:         keyExchangeType,
+	data := keyExchangeData{
 		PubKey:       ourEphemeralHex,
 		StaticPubKey: s.ourStaticPubKey,
 		ClientName:   s.ourName,
 		Signature:    base64.StdEncoding.EncodeToString(sig),
-	})
+	}
+	inner, _ := json.Marshal(data)
+	payload := signal.New(signal.TypeKeyExchange, s.ourStaticPubKey, "", inner)
 	_ = s.conn.SetWriteDeadline(time.Now().Add(s.timeout))
-	if err := s.conn.WriteMessage(websocket.TextMessage, raw); err != nil {
+	if err := s.conn.WriteMessage(websocket.TextMessage, payload); err != nil {
 		return fmt.Errorf("session: write: %w", err)
 	}
 	return nil
 }
 
-func (s *Session) doRecv() (keyExchangeMsg, error) {
+func (s *Session) doRecv() (keyExchangeData, error) {
 	_ = s.conn.SetReadDeadline(time.Now().Add(s.timeout))
 	_, raw, readErr := s.conn.ReadMessage()
 	_ = s.conn.SetReadDeadline(time.Time{})
 	if readErr != nil {
-		return keyExchangeMsg{}, fmt.Errorf("session: read peer key: %w", readErr)
+		return keyExchangeData{}, fmt.Errorf("session: read peer key: %w", readErr)
 	}
-	var msg keyExchangeMsg
-	if err := json.Unmarshal(raw, &msg); err != nil {
-		return keyExchangeMsg{}, fmt.Errorf("session: unmarshal key exchange: %w", err)
+	sig, err := signal.Parse(raw)
+	if err != nil {
+		return keyExchangeData{}, fmt.Errorf("session: parse signal: %w", err)
 	}
-	if msg.Type != keyExchangeType {
-		return keyExchangeMsg{}, fmt.Errorf("session: expected key_exchange, got %s", msg.Type)
+	if sig.Type != signal.TypeKeyExchange {
+		return keyExchangeData{}, fmt.Errorf("session: expected key_exchange, got %s", sig.Type)
 	}
-	return msg, nil
+	var data keyExchangeData
+	if err = json.Unmarshal(sig.Content, &data); err != nil {
+		return keyExchangeData{}, fmt.Errorf("session: unmarshal key exchange data: %w", err)
+	}
+	if sig.From != "" {
+		data.StaticPubKey = sig.From
+	}
+	return data, nil
 }
 
-func (s *Session) verifyPeer(peer keyExchangeMsg) error {
+func (s *Session) verifyPeer(peer keyExchangeData) error {
 	if peer.StaticPubKey == "" {
 		return errors.New("session: peer sent no static public key")
 	}
@@ -117,7 +121,7 @@ func (s *Session) verifyPeer(peer keyExchangeMsg) error {
 	return nil
 }
 
-func (s *Session) deriveKeys(shared []byte, initiator bool, peer keyExchangeMsg) {
+func (s *Session) deriveKeys(shared []byte, initiator bool, peer keyExchangeData) {
 	sendKey := sha256.Sum256(append([]byte("session:send"), shared...))
 	recvKey := sha256.Sum256(append([]byte("session:recv"), shared...))
 
@@ -142,7 +146,7 @@ func (s *Session) handshake(ctx context.Context, initiator bool) error {
 	ourEphemeralHex := hex.EncodeToString(ourKey.PublicKey().Bytes())
 	sig := s.ourKeys.Sign([]byte(ourEphemeralHex))
 
-	var peer keyExchangeMsg
+	var peer keyExchangeData
 	if initiator {
 		if err = s.doSend(ourEphemeralHex, sig); err != nil {
 			return err
@@ -205,7 +209,7 @@ func (s *Session) encrypt(plain []byte) ([]byte, error) {
 		return nil, errors.New("session: no key established")
 	}
 	key := s.sendKey
-	nonce := make([]byte, nonceSize)
+	nonce := make([]byte, config.NonceSize)
 	binary.BigEndian.PutUint64(nonce[:8], s.sendNonce)
 	s.sendNonce++
 	s.mu.Unlock()
@@ -216,14 +220,14 @@ func (s *Session) encrypt(plain []byte) ([]byte, error) {
 	}
 
 	ciphertext := gcm.Seal(nil, nonce, plain, nil)
-	out := make([]byte, nonceSize+len(ciphertext))
-	copy(out[:nonceSize], nonce)
-	copy(out[nonceSize:], ciphertext)
+	out := make([]byte, config.NonceSize+len(ciphertext))
+	copy(out[:config.NonceSize], nonce)
+	copy(out[config.NonceSize:], ciphertext)
 	return out, nil
 }
 
 func (s *Session) decrypt(data []byte) ([]byte, error) {
-	if len(data) < nonceSize {
+	if len(data) < config.NonceSize {
 		return nil, errors.New("session: data too short")
 	}
 
@@ -233,12 +237,12 @@ func (s *Session) decrypt(data []byte) ([]byte, error) {
 		return nil, errors.New("session: no key established")
 	}
 	key := s.recvKey
-	expectedNonce := make([]byte, nonceSize)
+	expectedNonce := make([]byte, config.NonceSize)
 	binary.BigEndian.PutUint64(expectedNonce[:8], s.recvNonce)
 	s.mu.Unlock()
 
-	nonce := data[:nonceSize]
-	ciphertext := data[nonceSize:]
+	nonce := data[:config.NonceSize]
+	ciphertext := data[config.NonceSize:]
 
 	if binary.BigEndian.Uint64(nonce[:8]) != binary.BigEndian.Uint64(expectedNonce[:8]) {
 		return nil, errors.New("session: nonce mismatch — possible replay or out-of-order delivery")
