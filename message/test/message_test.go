@@ -11,10 +11,7 @@ import (
 )
 
 func TestNewMessage(t *testing.T) {
-	m := message.NewMessage("alice", "bob", "hello")
-	if m.From != "alice" {
-		t.Errorf("From = %q, want alice", m.From)
-	}
+	m := message.NewMessage("bob", "hello")
 	if m.To != "bob" {
 		t.Errorf("To = %q, want bob", m.To)
 	}
@@ -27,7 +24,7 @@ func TestNewMessage(t *testing.T) {
 }
 
 func TestEncodeDecode(t *testing.T) {
-	orig := message.NewMessage("alice", "bob", "hello")
+	orig := message.NewMessage("bob", "hello")
 	data, err := orig.Encode()
 	if err != nil {
 		t.Fatal("Encode:", err)
@@ -38,9 +35,6 @@ func TestEncodeDecode(t *testing.T) {
 		t.Fatal("ToMessage:", err)
 	}
 
-	if dec.From != orig.From {
-		t.Errorf("From = %q, want %q", dec.From, orig.From)
-	}
 	if dec.To != orig.To {
 		t.Errorf("To = %q, want %q", dec.To, orig.To)
 	}
@@ -60,14 +54,14 @@ func TestToMessageInvalid(t *testing.T) {
 }
 
 func TestNewMessageIDEmpty(t *testing.T) {
-	m := message.NewMessage("alice", "bob", "hello")
+	m := message.NewMessage("bob", "hello")
 	if m.ID != "" {
 		t.Errorf("ID = %q, want empty", m.ID)
 	}
 }
 
 func TestEncodeDecodePreservesID(t *testing.T) {
-	m := message.NewMessage("a", "b", "c")
+	m := message.NewMessage("b", "c")
 	m.ID = "my-custom-id"
 	data, err := m.Encode()
 	if err != nil {
@@ -84,7 +78,7 @@ func TestEncodeDecodePreservesID(t *testing.T) {
 }
 
 func TestMessageIDOmitEmpty(t *testing.T) {
-	m := &message.Message{From: "a", To: "b", Content: "c"}
+	m := &message.Message{To: "b", Content: "c"}
 	data, _ := m.Encode()
 	if idStr := `"id"`; strings.Contains(string(data), idStr) {
 		t.Error("JSON should not contain 'id' when empty")
@@ -95,8 +89,8 @@ func TestMessagePutGeneratesID(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "test_put_genid")
 	s := store.New(dir)
 
-	msg := message.NewMessage("alice", "bob", "hello")
-	id, err := message.Put(s, "secret", msg)
+	msg := message.NewMessage("bob", "hello")
+	id, err := message.Put(s, "secret", "alice", msg)
 	if err != nil {
 		t.Fatal("Put:", err)
 	}
@@ -115,9 +109,9 @@ func TestMessagePutReusesID(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "test_put_reuseid")
 	s := store.New(dir)
 
-	msg := message.NewMessage("alice", "bob", "custom id test")
+	msg := message.NewMessage("bob", "custom id test")
 	msg.ID = "pre-set-id"
-	id, err := message.Put(s, "secret", msg)
+	id, err := message.Put(s, "secret", "alice", msg)
 	if err != nil {
 		t.Fatal("Put:", err)
 	}
@@ -138,12 +132,12 @@ func TestMessagePutWithIDThenUpdate(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "test_putid_upd")
 	s := store.New(dir)
 
-	msg := message.NewMessage("alice", "bob", "original")
+	msg := message.NewMessage("bob", "original")
 	msg.ID = "fixed-id"
-	message.Put(s, "secret", msg)
+	message.Put(s, "secret", "alice", msg)
 
 	msg.Content = "updated"
-	err := message.Update(s, "secret", "fixed-id", msg)
+	err := message.Update(s, "secret", "fixed-id", "alice", msg)
 	if err != nil {
 		t.Fatal("Update:", err)
 	}
@@ -167,7 +161,7 @@ func TestEncodeDecodeEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatal("ToMessage:", err)
 	}
-	if dec.From != "" || dec.To != "" || dec.Content != "" || dec.Time != "" {
+	if dec.To != "" || dec.Content != "" || dec.Time != "" {
 		t.Error("empty message fields should be preserved")
 	}
 }
@@ -176,8 +170,8 @@ func TestMessageStoreRoundTrip(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "test_msg_rt")
 	s := store.New(dir)
 
-	msg := message.NewMessage("alice", "bob", "hello from alice")
-	id, err := message.Put(s, "some-secret", msg)
+	msg := message.NewMessage("bob", "hello from alice")
+	id, err := message.Put(s, "some-secret", "alice", msg)
 	if err != nil {
 		t.Fatal("message.Put:", err)
 	}
@@ -187,9 +181,6 @@ func TestMessageStoreRoundTrip(t *testing.T) {
 		t.Fatal("message.Get:", err)
 	}
 
-	if got.From != "alice" {
-		t.Errorf("From = %q, want %q", got.From, "alice")
-	}
 	if got.To != "bob" {
 		t.Errorf("To = %q, want %q", got.To, "bob")
 	}
@@ -205,8 +196,8 @@ func TestMessageStoreListIncludesTimestamp(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "test_msg_list")
 	s := store.New(dir)
 
-	message.Put(s, "secret", message.NewMessage("a", "b", "first"))
-	message.Put(s, "secret", message.NewMessage("b", "a", "second"))
+	message.Put(s, "secret", "a", message.NewMessage("b", "first"))
+	message.Put(s, "secret", "b", message.NewMessage("a", "second"))
 
 	list, err := s.Chats.List()
 	if err != nil {
@@ -228,8 +219,8 @@ func TestMessageStoreGetWithTimestamp(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "test_msg_ts")
 	s := store.New(dir)
 
-	msg := message.NewMessage("alice", "bob", "timed message")
-	id, err := message.Put(s, "secret", msg)
+	msg := message.NewMessage("bob", "timed message")
+	id, err := message.Put(s, "secret", "alice", msg)
 	if err != nil {
 		t.Fatal("Put:", err)
 	}
@@ -248,14 +239,14 @@ func TestMessageUpdate(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "test_msg_update")
 	s := store.New(dir)
 
-	msg := message.NewMessage("alice", "bob", "original")
-	id, err := message.Put(s, "secret", msg)
+	msg := message.NewMessage("bob", "original")
+	id, err := message.Put(s, "secret", "alice", msg)
 	if err != nil {
 		t.Fatal("Put:", err)
 	}
 
-	updated := message.NewMessage("alice", "bob", "updated")
-	err = message.Update(s, "secret", id, updated)
+	updated := message.NewMessage("bob", "updated")
+	err = message.Update(s, "secret", id, "alice", updated)
 	if err != nil {
 		t.Fatal("Update:", err)
 	}
@@ -273,8 +264,8 @@ func TestMessageDelete(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "test_msg_delete")
 	s := store.New(dir)
 
-	msg := message.NewMessage("alice", "bob", "delete me")
-	id, err := message.Put(s, "secret", msg)
+	msg := message.NewMessage("bob", "delete me")
+	id, err := message.Put(s, "secret", "alice", msg)
 	if err != nil {
 		t.Fatal("Put:", err)
 	}
@@ -294,11 +285,11 @@ func TestMessageUpdateOverwrites(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "test_msg_updover")
 	s := store.New(dir)
 
-	msg1 := message.NewMessage("a", "b", "first")
-	id, _ := message.Put(s, "secret", msg1)
+	msg1 := message.NewMessage("b", "first")
+	id, _ := message.Put(s, "secret", "a", msg1)
 
-	msg2 := message.NewMessage("a", "b", "second")
-	err := message.Update(s, "secret", id, msg2)
+	msg2 := message.NewMessage("b", "second")
+	err := message.Update(s, "secret", id, "a", msg2)
 	if err != nil {
 		t.Fatal("Update:", err)
 	}
@@ -317,8 +308,8 @@ func TestMessageUnicode(t *testing.T) {
 	s := store.New(dir)
 
 	content := "Hello 世界 👋"
-	msg := message.NewMessage("alice", "bob", content)
-	id, err := message.Put(s, "secret", msg)
+	msg := message.NewMessage("bob", content)
+	id, err := message.Put(s, "secret", "alice", msg)
 	if err != nil {
 		t.Fatal("Put:", err)
 	}
@@ -336,8 +327,8 @@ func TestMessageEmptyContent(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "test_emptycontent")
 	s := store.New(dir)
 
-	msg := message.NewMessage("alice", "bob", "")
-	id, err := message.Put(s, "secret", msg)
+	msg := message.NewMessage("bob", "")
+	id, err := message.Put(s, "secret", "alice", msg)
 	if err != nil {
 		t.Fatal("Put:", err)
 	}
@@ -356,8 +347,8 @@ func TestMessageLargeContent(t *testing.T) {
 	s := store.New(dir)
 
 	content := strings.Repeat("A", 10000)
-	msg := message.NewMessage("alice", "bob", content)
-	id, err := message.Put(s, "secret", msg)
+	msg := message.NewMessage("bob", content)
+	id, err := message.Put(s, "secret", "alice", msg)
 	if err != nil {
 		t.Fatal("Put:", err)
 	}
@@ -375,9 +366,9 @@ func TestSearchBasic(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "test_search_basic")
 	s := store.New(dir)
 
-	message.Put(s, "secret", message.NewMessage("alice", "bob", "hello world"))
-	message.Put(s, "secret", message.NewMessage("bob", "alice", "how are you"))
-	message.Put(s, "secret", message.NewMessage("alice", "bob", "world of go"))
+	message.Put(s, "secret", "alice", message.NewMessage("bob", "hello world"))
+	message.Put(s, "secret", "bob", message.NewMessage("alice", "how are you"))
+	message.Put(s, "secret", "alice", message.NewMessage("bob", "world of go"))
 
 	results, err := message.Search(s, "secret", "world", 10)
 	if err != nil {
@@ -392,7 +383,7 @@ func TestSearchNoMatch(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "test_search_nomatch")
 	s := store.New(dir)
 
-	message.Put(s, "secret", message.NewMessage("alice", "bob", "hello"))
+	message.Put(s, "secret", "alice", message.NewMessage("bob", "hello"))
 
 	results, err := message.Search(s, "secret", "zzzz", 10)
 	if err != nil {
@@ -407,8 +398,8 @@ func TestSearchLimit(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "test_search_limit")
 	s := store.New(dir)
 
-	message.Put(s, "secret", message.NewMessage("a", "b", "match one"))
-	message.Put(s, "secret", message.NewMessage("c", "d", "match two"))
+	message.Put(s, "secret", "a", message.NewMessage("b", "match one"))
+	message.Put(s, "secret", "c", message.NewMessage("d", "match two"))
 
 	results, err := message.Search(s, "secret", "match", 1)
 	if err != nil {
@@ -423,7 +414,7 @@ func TestSearchCaseInsensitive(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "test_search_case")
 	s := store.New(dir)
 
-	message.Put(s, "secret", message.NewMessage("Alice", "Bob", "HELLO World"))
+	message.Put(s, "secret", "Alice", message.NewMessage("Bob", "HELLO World"))
 
 	results, err := message.Search(s, "secret", "hello", 10)
 	if err != nil {
@@ -441,18 +432,18 @@ func TestSearchMatchesFrom(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "test_search_from")
 	s := store.New(dir)
 
-	message.Put(s, "secret", message.NewMessage("alice", "bob", "hi"))
-	message.Put(s, "secret", message.NewMessage("charlie", "bob", "hello"))
+	message.Put(s, "secret", "alice", message.NewMessage("bob", "hi"))
+	message.Put(s, "secret", "charlie", message.NewMessage("bob", "hello"))
 
-	results, err := message.Search(s, "secret", "alice", 10)
+	results, err := message.Search(s, "secret", "hi", 10)
 	if err != nil {
 		t.Fatal("Search:", err)
 	}
 	if len(results) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(results))
 	}
-	if results[0].From != "alice" {
-		t.Errorf("From = %q, want %q", results[0].From, "alice")
+	if results[0].Content != "hi" {
+		t.Errorf("Content = %q, want %q", results[0].Content, "hi")
 	}
 }
 
@@ -478,14 +469,14 @@ func TestAttachmentStoreAndRetrieve(t *testing.T) {
 		MIMEType: "text/plain",
 		Data:     []byte("hello world"),
 	}
-	msg := message.NewMessage("alice", "bob", "file", att)
+	msg := message.NewMessage("bob", "file", att)
 	msg.ID = "att-test-msg-id"
 
 	if err := message.StoreAttachments(s, "secret", msg.ID, msg.Attachments); err != nil {
 		t.Fatal("StoreAttachments:", err)
 	}
 
-	id, err := message.Put(s, "secret", msg)
+	id, err := message.Put(s, "secret", "alice", msg)
 	if err != nil {
 		t.Fatal("Put:", err)
 	}
@@ -524,13 +515,13 @@ func TestSearchAttachmentName(t *testing.T) {
 		Name: "report.pdf",
 		Data: []byte("pdf data"),
 	}
-	msg := message.NewMessage("alice", "bob", "here it is", att)
+	msg := message.NewMessage("bob", "here it is", att)
 	msg.ID = "search-att-msg"
 	var err error
 	if err = message.StoreAttachments(s, "secret", msg.ID, msg.Attachments); err != nil {
 		t.Fatal("StoreAttachments:", err)
 	}
-	if _, err = message.Put(s, "secret", msg); err != nil {
+	if _, err = message.Put(s, "secret", "alice", msg); err != nil {
 		t.Fatal("Put:", err)
 	}
 
@@ -554,12 +545,12 @@ func TestMessageDeleteRemovesFiles(t *testing.T) {
 		Name: "photo.jpg",
 		Data: []byte("image data"),
 	}
-	msg := message.NewMessage("alice", "bob", "pic", att)
+	msg := message.NewMessage("bob", "pic", att)
 	msg.ID = "delete-files-msg"
 	if err := message.StoreAttachments(s, "secret", msg.ID, msg.Attachments); err != nil {
 		t.Fatal("StoreAttachments:", err)
 	}
-	id, err := message.Put(s, "secret", msg)
+	id, err := message.Put(s, "secret", "alice", msg)
 	if err != nil {
 		t.Fatal("Put:", err)
 	}
@@ -594,13 +585,13 @@ func TestMultipleAttachments(t *testing.T) {
 		Name: "img.png",
 		Data: []byte("png data"),
 	}
-	msg := message.NewMessage("alice", "bob", "two files", att1, att2)
+	msg := message.NewMessage("bob", "two files", att1, att2)
 	msg.ID = "multi-att-msg"
 	if err := message.StoreAttachments(s, "secret", msg.ID, msg.Attachments); err != nil {
 		t.Fatal("StoreAttachments:", err)
 	}
 	var putErr error
-	if _, putErr = message.Put(s, "secret", msg); putErr != nil {
+	if _, putErr = message.Put(s, "secret", "alice", msg); putErr != nil {
 		t.Fatal("Put:", putErr)
 	}
 
@@ -631,12 +622,12 @@ func TestStoreAttachmentsEmptyData(t *testing.T) {
 	s := store.New(dir)
 
 	att := message.Attachment{Name: "empty.bin"}
-	msg := message.NewMessage("alice", "bob", "empty att", att)
+	msg := message.NewMessage("bob", "empty att", att)
 	msg.ID = "empty-att-msg"
 	if err := message.StoreAttachments(s, "secret", msg.ID, msg.Attachments); err != nil {
 		t.Fatal("StoreAttachments:", err)
 	}
-	if _, err := message.Put(s, "secret", msg); err != nil {
+	if _, err := message.Put(s, "secret", "alice", msg); err != nil {
 		t.Fatal("Put:", err)
 	}
 
@@ -660,8 +651,8 @@ func TestSpecialChars(t *testing.T) {
 	s := store.New(dir)
 
 	content := "tab\tnewline\nquote\"backslash\\end"
-	msg := message.NewMessage("a", "b", content)
-	id, err := message.Put(s, "secret", msg)
+	msg := message.NewMessage("b", content)
+	id, err := message.Put(s, "secret", "a", msg)
 	if err != nil {
 		t.Fatal("Put:", err)
 	}

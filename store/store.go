@@ -47,7 +47,7 @@ func New(dir string) *Store {
 
 	for _, q := range []string{
 		"CREATE TABLE IF NOT EXISTS chats (id TEXT PRIMARY KEY, value TEXT, created_at TEXT)",
-		"CREATE TABLE IF NOT EXISTS known_peers (pub_key TEXT PRIMARY KEY, peer_ip TEXT, status TEXT, last_seen TEXT)",
+		"CREATE TABLE IF NOT EXISTS known_peers (pub_key TEXT PRIMARY KEY, peer_ip TEXT, name TEXT, nickname TEXT, status TEXT, last_seen TEXT)",
 		"CREATE TABLE IF NOT EXISTS files (id TEXT PRIMARY KEY, data BLOB, msg_id TEXT, created_at TEXT)",
 		"CREATE TABLE IF NOT EXISTS chat_search (msg_id TEXT PRIMARY KEY, from_name TEXT, to_name TEXT, search_text TEXT)",
 		`CREATE TABLE IF NOT EXISTS outbox (

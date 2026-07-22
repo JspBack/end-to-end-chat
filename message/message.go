@@ -60,7 +60,6 @@ type Attachment struct {
 
 type Message struct {
 	ID          string       `json:"id,omitempty"`
-	From        string       `json:"from"`
 	FromPubKey  string       `json:"from_pub_key,omitempty"`
 	To          string       `json:"to"`
 	Content     string       `json:"content"`
@@ -68,8 +67,8 @@ type Message struct {
 	Attachments []Attachment `json:"attachments,omitempty"`
 }
 
-func NewMessage(from, to, content string, attachments ...Attachment) *Message {
-	return &Message{From: from, To: to, Content: content, Time: time.Now().UTC().Format(time.RFC3339), Attachments: attachments}
+func NewMessage(to, content string, attachments ...Attachment) *Message {
+	return &Message{To: to, Content: content, Time: time.Now().UTC().Format(time.RFC3339), Attachments: attachments}
 }
 
 func (m *Message) Encode() ([]byte, error) {
@@ -100,7 +99,7 @@ func searchText(msg *Message) string {
 	return b.String()
 }
 
-func Put(s *store.Store, secret string, msg *Message) (string, error) {
+func Put(s *store.Store, secret, fromName string, msg *Message) (string, error) {
 	plain, err := json.Marshal(msg)
 	if err != nil {
 		return "", fmt.Errorf("message: marshal: %w", err)
@@ -118,7 +117,7 @@ func Put(s *store.Store, secret string, msg *Message) (string, error) {
 		}
 		msg.ID = id
 	}
-	_ = s.Chats.IndexSearch(id, msg.From, msg.To, searchText(msg))
+	_ = s.Chats.IndexSearch(id, fromName, msg.To, searchText(msg))
 	s.Chats.CacheStore(id, string(plain))
 	return id, nil
 }
@@ -145,7 +144,7 @@ func Get(s *store.Store, secret, id string) (*Message, error) {
 	return &msg, nil
 }
 
-func Update(s *store.Store, secret, id string, msg *Message) error {
+func Update(s *store.Store, secret, id, fromName string, msg *Message) error {
 	plain, err := json.Marshal(msg)
 	if err != nil {
 		return fmt.Errorf("message: marshal: %w", err)
@@ -153,7 +152,7 @@ func Update(s *store.Store, secret, id string, msg *Message) error {
 	if err = s.Chats.Update(id, string(plain), secret); err != nil {
 		return fmt.Errorf("message: store update: %w", err)
 	}
-	_ = s.Chats.IndexSearch(id, msg.From, msg.To, searchText(msg))
+	_ = s.Chats.IndexSearch(id, fromName, msg.To, searchText(msg))
 	s.Chats.CacheStore(id, string(plain))
 	return nil
 }

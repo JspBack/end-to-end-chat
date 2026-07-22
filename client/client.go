@@ -115,7 +115,7 @@ func (c *Client) Shutdown() {
 
 func (c *Client) sendMessage(sess *Session, msg *message.Message) error {
 	msg.FromPubKey = c.Keys.Public
-	if _, err := message.Put(c.Store, c.Keys.Private, msg); err != nil {
+	if _, err := message.Put(c.Store, c.Keys.Private, c.Name, msg); err != nil {
 		c.log.Warn("store message failed", "error", err)
 	}
 
@@ -171,7 +171,7 @@ func (c *Client) queueSignal(targetPubKey string, sig []byte) error {
 
 func (c *Client) sendMessageToPeer(targetPubKey string, msg *message.Message) error {
 	msg.FromPubKey = c.Keys.Public
-	if _, err := message.Put(c.Store, c.Keys.Private, msg); err != nil {
+	if _, err := message.Put(c.Store, c.Keys.Private, c.Name, msg); err != nil {
 		c.log.Warn("store message failed", "error", err)
 	}
 	payload, err := json.Marshal(msg)
@@ -224,7 +224,7 @@ func (c *Client) sendToAll(content string) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	c.sessions.Range(func(_, value interface{}) bool {
 		if sess, ok := value.(*Session); ok {
-			msg := message.NewMessage(c.Name, sess.peerName(), content)
+			msg := message.NewMessage(sess.peerName(), content)
 			msg.Time = now
 			if err := c.sendMessage(sess, msg); err != nil {
 				c.log.Warn("send to session", "peer", sess.peerName(), "error", err)
@@ -259,12 +259,13 @@ func (c *Client) handleSignal(sig *signal.Signal, pubKey string) {
 			return
 		}
 		msg.FromPubKey = pubKey
-		if _, putErr := message.Put(c.Store, c.Keys.Private, msg); putErr != nil {
+		fromName := c.peerNameForPubKey(pubKey)
+		if _, putErr := message.Put(c.Store, c.Keys.Private, fromName, msg); putErr != nil {
 			c.log.Warn("store message failed", "error", putErr)
 		}
 		if msg.To == c.Name {
 			c.log.Debug("message received",
-				"from", msg.From, "to", msg.To)
+				"from", fromName, "to", msg.To)
 		}
 
 	case signal.TypeFileMeta:
@@ -374,6 +375,22 @@ func (c *Client) handleDecrypted(plain []byte, sess *Session, pubKey string) {
 	}
 }
 
+func (c *Client) peerNameForPubKey(pubKey string) string {
+	if v, ok := c.sessions.Load(pubKey); ok {
+		if sess, sessOk := v.(*Session); sessOk {
+			if n := sess.peerName(); n != "" {
+				return n
+			}
+		}
+	}
+	if peer, err := c.Store.KnownPeers.Get(pubKey); err == nil {
+		if peer.Name != "" {
+			return peer.Name
+		}
+	}
+	return pubKey[:16]
+}
+
 func (c *Client) verifyAuthor(id, pubKey string) (*message.Message, error) {
 	msg, err := message.Get(c.Store, c.Keys.Private, id)
 	if err != nil {
@@ -401,7 +418,7 @@ func (c *Client) verifyAndUpdate(sig *signal.Signal, pubKey string) error {
 		return err
 	}
 	msg.Content = string(sig.Content)
-	if err = message.Update(c.Store, c.Keys.Private, sig.ID, msg); err != nil {
+	if err = message.Update(c.Store, c.Keys.Private, sig.ID, c.Name, msg); err != nil {
 		return fmt.Errorf("verify update: %w", err)
 	}
 	return nil

@@ -25,10 +25,30 @@ const (
 	statusDeleted      = "deleted"
 	statusUpdated      = "updated"
 	statusFlushed      = "flushed"
+	statusNicknameSet  = "nickname_set"
 )
 
 type statusResponse struct {
 	Status string `json:"status"`
+}
+
+func (c *Client) msgResponse(msg *message.Message) interface{} {
+	from := ""
+	if msg.FromPubKey == c.Keys.Public {
+		from = c.Name
+	} else if msg.FromPubKey != "" {
+		if peer, err := c.Store.KnownPeers.Get(msg.FromPubKey); err == nil {
+			if peer.Nickname != "" {
+				from = peer.Nickname
+			} else {
+				from = peer.Name
+			}
+		}
+	}
+	return struct {
+		*message.Message
+		From string `json:"from"`
+	}{msg, from}
 }
 
 func (c *Client) adminListPeers(w http.ResponseWriter, _ *http.Request) {
@@ -63,6 +83,37 @@ func (c *Client) adminUpdatePeerStatus(w http.ResponseWriter, r *http.Request, s
 	}
 
 	peer.Status = status
+	if err = c.Store.KnownPeers.Add(peer); err != nil {
+		http.Error(w, err.Error()+"\n", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(peer)
+}
+
+func (c *Client) adminSetNickname(w http.ResponseWriter, r *http.Request) {
+	pubKey := r.PathValue("pubKey")
+	if pubKey == "" {
+		http.Error(w, "missing pubKey\n", http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		Nickname string `json:"nickname"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid body\n", http.StatusBadRequest)
+		return
+	}
+
+	peer, err := c.Store.KnownPeers.Get(pubKey)
+	if err != nil {
+		http.Error(w, "peer not found\n", http.StatusNotFound)
+		return
+	}
+
+	peer.Nickname = req.Nickname
 	if err = c.Store.KnownPeers.Add(peer); err != nil {
 		http.Error(w, err.Error()+"\n", http.StatusInternalServerError)
 		return
@@ -232,7 +283,7 @@ func (c *Client) apiSendMessage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	msg := message.NewMessage(c.Name, peerName, content)
+	msg := message.NewMessage(peerName, content)
 	queued := !sessLoaded
 	if sessLoaded {
 		if sess, ok := sessRaw.(*Session); ok {
@@ -341,7 +392,7 @@ func (c *Client) apiGetMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(msg)
+	_ = json.NewEncoder(w).Encode(c.msgResponse(msg))
 }
 
 func (c *Client) apiSearchMessages(w http.ResponseWriter, r *http.Request) {
@@ -360,8 +411,13 @@ func (c *Client) apiSearchMessages(w http.ResponseWriter, r *http.Request) {
 		results = []message.Message{}
 	}
 
+	resp := make([]interface{}, len(results))
+	for i := range results {
+		resp[i] = c.msgResponse(&results[i])
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(results)
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 func (c *Client) getOwnedMessage(id string) (*message.Message, error) {
@@ -369,7 +425,7 @@ func (c *Client) getOwnedMessage(id string) (*message.Message, error) {
 	if err != nil {
 		return nil, fmt.Errorf("get message: %w", err)
 	}
-	if msg.From != c.Name {
+	if msg.FromPubKey != c.Keys.Public {
 		return nil, errNotOwner
 	}
 	return msg, nil
@@ -405,7 +461,7 @@ func (c *Client) apiUpdateMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	msg.Content = req.Content
-	if updateErr := message.Update(c.Store, c.Keys.Private, id, msg); updateErr != nil {
+	if updateErr := message.Update(c.Store, c.Keys.Private, id, c.Name, msg); updateErr != nil {
 		http.Error(w, updateErr.Error()+"\n", http.StatusInternalServerError)
 		return
 	}

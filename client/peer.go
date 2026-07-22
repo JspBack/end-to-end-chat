@@ -126,6 +126,7 @@ func (c *Client) connectSession(ctx context.Context, addr string) error {
 	_ = c.Store.KnownPeers.Add(&store.KnownPeer{
 		PeerIP: addr,
 		PubKey: sess.peerPubKey(),
+		Name:   sess.peerName(),
 		Status: store.PeerStatusAccepted,
 	})
 
@@ -143,6 +144,7 @@ func (c *Client) storeSession(sess *Session) {
 		}
 	}
 	c.sessions.Store(pubKey, sess)
+	_ = c.Store.KnownPeers.SetName(pubKey, sess.peerName())
 	c.flushOutbox(pubKey)
 }
 
@@ -155,7 +157,7 @@ func (c *Client) peerWriteLoop(ctx context.Context, sess *Session, lines <-chan 
 			if !ok {
 				return
 			}
-			msg := message.NewMessage(c.Name, sess.peerName(), line)
+			msg := message.NewMessage(sess.peerName(), line)
 			if err := c.sendMessage(sess, msg); err != nil {
 				c.log.WarnContext(ctx, "send failed", "peer", sess.peerName(), "error", err)
 			}

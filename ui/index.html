@@ -41,7 +41,7 @@ td button { margin: 0 2px; padding: 4px 8px; font-size: 0.75rem; }
 
 <div class="section section-peers">
   <h2>Peers</h2>
-  <table><thead><tr><th>pubkey</th><th>addr</th><th>status</th><th>online</th><th>last seen</th><th></th></tr></thead><tbody id="peers"></tbody></table>
+  <table><thead><tr><th>pubkey</th><th>addr</th><th>name</th><th>nickname</th><th>status</th><th>online</th><th>last seen</th><th></th></tr></thead><tbody id="peers"></tbody></table>
 </div>
 
 <div class="section section-sessions">
@@ -94,7 +94,10 @@ async function api(path, opts) {
 async function loadPeers() {
   const data = await api('/admin/peers') || [];
   document.getElementById('peers').innerHTML = data.map(p => `<tr>
-    <td>${p.pub_key}</td><td>${p.peer_ip}</td><td><span class="badge badge-${p.status}">${p.status}</span></td>
+    <td>${p.pub_key}</td><td>${p.peer_ip}</td><td>${p.name || '-'}</td>
+    <td><input id="nick-${p.pub_key}" value="${p.nickname || ''}" placeholder="nickname" style="width:100px;font-size:0.7rem;padding:2px 4px">
+      <button type="button" style="padding:2px 6px;font-size:0.7rem" onclick="setNickname('${p.pub_key}')">set</button></td>
+    <td><span class="badge badge-${p.status}">${p.status}</span></td>
     <td>${p.online ? '<span class="badge" style="background:#e8f5e9;color:#2e7d32">online</span>' : '<span class="badge" style="background:#f5f5f5;color:#999">offline</span>'}</td>
     <td style="font-size:0.75rem">${p.last_seen || '-'}</td>
     <td>
@@ -221,6 +224,13 @@ async function deleteOutboxEntry(id) {
     loadOutbox();
   } catch (e) { alert(e.message); }
 }
+async function setNickname(pk) {
+  const nickname = document.getElementById('nick-' + pk).value;
+  try {
+    await api('/admin/peers/' + pk + '/nickname', { method: 'PUT', body: JSON.stringify({ nickname }) });
+    loadPeers();
+  } catch (e) { alert(e.message); }
+}
 async function disconnectSession(pk) {
   if (!confirm('disconnect session ' + pk.slice(0,12) + '...?')) return;
   try {
@@ -232,6 +242,7 @@ async function refreshAll() {
   await Promise.all([loadPeers(), loadSessions(), loadOutbox(), loadMessages()]);
 }
 function escapeHtml(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+window.setNickname = setNickname;
 window.updatePeer = updatePeer;
 window.connectPeer = connectPeer;
 window.sendMessage = sendMessage;

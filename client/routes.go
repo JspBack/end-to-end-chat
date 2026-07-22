@@ -37,6 +37,7 @@ func (c *Client) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/messages/{id}", c.localhostOnly(c.apiUpdateMessage))
 	mux.HandleFunc("DELETE /api/messages/{id}", c.localhostOnly(c.apiDeleteMessage))
 	mux.HandleFunc("GET /api/files/{id}", c.localhostOnly(c.apiGetFile))
+	mux.HandleFunc("PUT /admin/peers/{pubKey}/nickname", c.localhostOnly(c.adminSetNickname))
 	mux.HandleFunc("GET /admin/outbox", c.localhostOnly(c.adminListOutbox))
 	mux.HandleFunc("DELETE /admin/outbox/{id}", c.localhostOnly(c.adminDeleteOutboxEntry))
 	mux.HandleFunc("POST /admin/outbox/flush/{pubKey}", c.localhostOnly(c.adminFlushOutbox))

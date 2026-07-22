@@ -114,6 +114,7 @@ func (c *Client) startSession(ctx context.Context, conn *websocket.Conn, pubKey,
 	}
 
 	c.sessions.Store(pubKey, sess)
+	_ = c.Store.KnownPeers.SetName(pubKey, sess.peerName())
 	c.flushOutbox(pubKey)
 
 	c.log.DebugContext(ctx, "session ready",
