@@ -40,6 +40,11 @@ func (c *Client) adminListPeers(w http.ResponseWriter, _ *http.Request) {
 	if peers == nil {
 		peers = []store.KnownPeer{}
 	}
+	for i := range peers {
+		if _, ok := c.sessions.Load(peers[i].PubKey); ok {
+			peers[i].Online = true
+		}
+	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(peers)
 }

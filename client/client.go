@@ -218,7 +218,7 @@ func (c *Client) flushOutbox(pubKey string) {
 }
 
 func (c *Client) sendToAll(content string) {
-	now := time.Now().Format(time.RFC3339)
+	now := time.Now().UTC().Format(time.RFC3339)
 	c.sessions.Range(func(_, value interface{}) bool {
 		if sess, ok := value.(*Session); ok {
 			msg := message.NewMessage(c.Name, sess.peerName(), content)

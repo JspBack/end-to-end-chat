@@ -92,6 +92,7 @@ func (c *Client) closeExistingSession(pubKey string, conn *websocket.Conn) {
 	if old, loaded := c.sessions.LoadAndDelete(pubKey); loaded {
 		if oldSess, ok := old.(*Session); ok {
 			c.log.Debug("replacing existing session", "pub_key", pubKey, "remote", conn.RemoteAddr())
+			_ = c.Store.KnownPeers.SetLastSeen(pubKey, time.Now().UTC().Format(time.RFC3339))
 			_ = oldSess.closeConn()
 		}
 	}
@@ -150,6 +151,7 @@ func (c *Client) readLoop(ctx context.Context, sess *Session) error {
 	pubKey := sess.peerPubKey()
 	defer func() {
 		c.sessions.Delete(pubKey)
+		_ = c.Store.KnownPeers.SetLastSeen(pubKey, time.Now().UTC().Format(time.RFC3339))
 		_ = sess.closeConn()
 	}()
 

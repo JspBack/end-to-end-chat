@@ -69,7 +69,7 @@ type Message struct {
 }
 
 func NewMessage(from, to, content string, attachments ...Attachment) *Message {
-	return &Message{From: from, To: to, Content: content, Time: time.Now().Format(time.RFC3339), Attachments: attachments}
+	return &Message{From: from, To: to, Content: content, Time: time.Now().UTC().Format(time.RFC3339), Attachments: attachments}
 }
 
 func (m *Message) Encode() ([]byte, error) {

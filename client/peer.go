@@ -138,6 +138,7 @@ func (c *Client) storeSession(sess *Session) {
 	sess.setStatus(store.PeerStatusAccepted)
 	if old, loaded := c.sessions.LoadAndDelete(pubKey); loaded {
 		if oldSess, ok := old.(*Session); ok {
+			_ = c.Store.KnownPeers.SetLastSeen(pubKey, time.Now().UTC().Format(time.RFC3339))
 			_ = oldSess.closeConn()
 		}
 	}
