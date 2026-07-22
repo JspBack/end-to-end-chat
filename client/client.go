@@ -142,7 +142,10 @@ func (c *Client) sendFile(sess *Session, id, name, mimeType string, size int64, 
 			copy(plain, []byte(id))
 			copy(plain[config.FileIDLen:], buf[:n])
 			if sendErr := sess.send(plain); sendErr != nil {
-				return fmt.Errorf("send file chunk: %w", sendErr)
+				if qerr := c.queueSignal(sess.peerPubKey(), plain); qerr != nil {
+					return fmt.Errorf("queue file chunk failed: %w", qerr)
+				}
+				c.log.Warn("send file chunk failed, queued for retry", "id", id, "chunk_bytes", n, "error", sendErr)
 			}
 			sent += int64(n)
 			c.log.Debug("send file chunk", "id", id, "chunk_bytes", n, "sent", sent, "total", size)
@@ -261,7 +264,7 @@ func (c *Client) handleSignal(sig *signal.Signal, pubKey string) {
 		}
 		if msg.To == c.Name {
 			c.log.Debug("message received",
-				"from", msg.From, "to", msg.To, "content", msg.Content)
+				"from", msg.From, "to", msg.To)
 		}
 
 	case signal.TypeFileMeta:
