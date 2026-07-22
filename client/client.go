@@ -163,6 +163,65 @@ func (c *Client) sendFile(sess *Session, id, name, mimeType string, size int64, 
 	return nil
 }
 
+func (c *Client) queueSignal(targetPubKey string, sig []byte) error {
+	_, err := c.Store.Outbox.Put(targetPubKey, sig, c.Keys.Private)
+	if err != nil {
+		return fmt.Errorf("queue signal: %w", err)
+	}
+	return nil
+}
+
+func (c *Client) sendMessageToPeer(targetPubKey string, msg *message.Message) error {
+	msg.FromPubKey = c.Keys.Public
+	if _, err := message.Put(c.Store, c.Keys.Private, msg); err != nil {
+		c.log.Warn("store message failed", "error", err)
+	}
+	payload, err := json.Marshal(msg)
+	if err != nil {
+		return fmt.Errorf("encode message: %w", err)
+	}
+	sig := signal.New(signal.TypeMessage, c.Keys.Public, "", payload)
+
+	v, ok := c.sessions.Load(targetPubKey)
+	if !ok {
+		return c.queueSignal(targetPubKey, sig)
+	}
+	sess, ok := v.(*Session)
+	if !ok || sess.status() != store.PeerStatusAccepted {
+		return c.queueSignal(targetPubKey, sig)
+	}
+	return sess.send(sig)
+}
+
+func (c *Client) flushOutbox(pubKey string) {
+	entries, err := c.Store.Outbox.GetPending(pubKey, c.Keys.Private)
+	if err != nil {
+		c.log.Warn("flush outbox: get pending", "error", err)
+		return
+	}
+	if len(entries) == 0 {
+		return
+	}
+	v, ok := c.sessions.Load(pubKey)
+	if !ok {
+		return
+	}
+	sess, ok := v.(*Session)
+	if !ok || sess.status() != store.PeerStatusAccepted {
+		return
+	}
+
+	for _, entry := range entries {
+		if sendErr := sess.send(entry.SignalContent); sendErr != nil {
+			_ = c.Store.Outbox.IncrementRetry(entry.ID)
+			return
+		}
+		if delErr := c.Store.Outbox.Delete(entry.ID); delErr != nil {
+			c.log.Warn("flush outbox: delete delivered entry", "entry_id", entry.ID, "error", delErr)
+		}
+	}
+}
+
 func (c *Client) sendToAll(content string) {
 	now := time.Now().Format(time.RFC3339)
 	c.sessions.Range(func(_, value interface{}) bool {

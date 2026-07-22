@@ -143,6 +143,7 @@ func (c *Client) storeSession(sess *Session) {
 		}
 	}
 	c.sessions.Store(pubKey, sess)
+	c.flushOutbox(pubKey)
 }
 
 func (c *Client) peerReadLoop(sess *Session) error {

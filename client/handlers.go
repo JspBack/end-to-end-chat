@@ -113,6 +113,7 @@ func (c *Client) startSession(ctx context.Context, conn *websocket.Conn, pubKey,
 	}
 
 	c.sessions.Store(pubKey, sess)
+	c.flushOutbox(pubKey)
 
 	c.log.DebugContext(ctx, "session ready",
 		"remote", conn.RemoteAddr(), "pub_key", pubKey,

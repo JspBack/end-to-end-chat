@@ -2,6 +2,7 @@ package client
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -140,13 +141,30 @@ func parseMessageForm(r *http.Request, maxSize int64) (string, []message.Attachm
 	return content, atts, nil
 }
 
+func (c *Client) sendAttachments(ctx context.Context, pubKey string, attachments []message.Attachment, msgID string) {
+	v, loaded := c.sessions.Load(pubKey)
+	if !loaded {
+		return
+	}
+	sess, ok := v.(*Session)
+	if !ok || sess.status() != store.PeerStatusAccepted {
+		return
+	}
+	c.log.DebugContext(ctx, "api send files", "count", len(attachments), "msg_id", msgID)
+	for _, att := range attachments {
+		fileReader := io.LimitReader(bytes.NewReader(att.Data), att.Size)
+		if sendErr := c.sendFile(sess, att.ID, att.Name, att.MIMEType, att.Size, fileReader); sendErr != nil {
+			c.log.WarnContext(ctx, "send file failed", "id", att.ID, "error", sendErr)
+		}
+	}
+}
+
 func (c *Client) apiSendMessage(w http.ResponseWriter, r *http.Request) {
 	pubKey := r.PathValue("pubKey")
 	if pubKey == "" {
 		http.Error(w, "missing pubKey\n", http.StatusBadRequest)
 		return
 	}
-
 	if pubKey == c.Keys.Public {
 		http.Error(w, "cannot message self\n", http.StatusBadRequest)
 		return
@@ -159,25 +177,36 @@ func (c *Client) apiSendMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = r.MultipartForm.RemoveAll() }()
 
-	v, ok := c.sessions.Load(pubKey)
-	if !ok {
-		http.Error(w, "peer not connected\n", http.StatusNotFound)
+	peer, err := c.Store.KnownPeers.Get(pubKey)
+	if err != nil {
+		http.Error(w, "unknown peer\n", http.StatusNotFound)
 		return
 	}
-	sess, ok := v.(*Session)
-	if !ok {
-		http.Error(w, "invalid session\n", http.StatusInternalServerError)
-		return
-	}
-
-	if sess.status() != store.PeerStatusAccepted {
-		c.log.WarnContext(r.Context(), "peer not accepted — message not sent",
-			"pub_key", pubKey, "peer_name", sess.peerName())
-		http.Error(w, "peer not accepted\n", http.StatusForbidden)
+	if peer.Status == store.PeerStatusRejected {
+		http.Error(w, "peer rejected\n", http.StatusForbidden)
 		return
 	}
 
-	msg := message.NewMessage(c.Name, sess.peerName(), content)
+	sessRaw, sessLoaded := c.sessions.Load(pubKey)
+	peerName := pubKey[:16]
+	if sessLoaded {
+		if sess, ok := sessRaw.(*Session); ok {
+			peerName = sess.peerName()
+			if sess.status() == store.PeerStatusRejected {
+				http.Error(w, "peer rejected\n", http.StatusForbidden)
+				return
+			}
+		}
+	}
+
+	msg := message.NewMessage(c.Name, peerName, content)
+	queued := !sessLoaded
+	if sessLoaded {
+		if sess, ok := sessRaw.(*Session); ok {
+			queued = sess.status() != store.PeerStatusAccepted
+		}
+	}
+
 	haveFiles := len(attachments) > 0
 	if haveFiles {
 		msg.ID = uuid.New().String()
@@ -192,26 +221,24 @@ func (c *Client) apiSendMessage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := c.sendMessage(sess, msg); err != nil {
+	if sendErr := c.sendMessageToPeer(pubKey, msg); sendErr != nil {
 		http.Error(w, "send failed\n", http.StatusInternalServerError)
 		return
 	}
 
 	if haveFiles {
-		c.log.DebugContext(r.Context(), "api send files", "count", len(attachments), "msg_id", msg.ID)
-		for _, att := range attachments {
-			fileReader := io.LimitReader(bytes.NewReader(att.Data), att.Size)
-			if sendErr := c.sendFile(sess, att.ID, att.Name, att.MIMEType, att.Size, fileReader); sendErr != nil {
-				c.log.WarnContext(r.Context(), "send file failed", "id", att.ID, "error", sendErr)
-			}
-		}
+		c.sendAttachments(r.Context(), pubKey, attachments, msg.ID)
 		if storeErr := message.StoreAttachments(c.Store, c.Keys.Private, msg.ID, attachments); storeErr != nil {
 			c.log.WarnContext(r.Context(), "store attachments failed", "error", storeErr)
 		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(statusResponse{Status: "sent"})
+	status := "sent"
+	if queued {
+		status = "queued"
+	}
+	_ = json.NewEncoder(w).Encode(statusResponse{Status: status})
 }
 
 func validateAddr(addr string) (string, error) {
@@ -391,4 +418,42 @@ func (c *Client) apiDeleteMessage(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(statusResponse{Status: "deleted"})
+}
+
+func (c *Client) adminListOutbox(w http.ResponseWriter, _ *http.Request) {
+	entries, err := c.Store.Outbox.GetAllPending()
+	if err != nil {
+		http.Error(w, err.Error()+"\n", http.StatusInternalServerError)
+		return
+	}
+	if entries == nil {
+		entries = []store.OutboxEntry{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(entries)
+}
+
+func (c *Client) adminDeleteOutboxEntry(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		http.Error(w, "missing id\n", http.StatusBadRequest)
+		return
+	}
+	if err := c.Store.Outbox.Delete(id); err != nil {
+		http.Error(w, err.Error()+"\n", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(statusResponse{Status: "deleted"})
+}
+
+func (c *Client) adminFlushOutbox(w http.ResponseWriter, r *http.Request) {
+	pubKey := r.PathValue("pubKey")
+	if pubKey == "" {
+		http.Error(w, "missing pubKey\n", http.StatusBadRequest)
+		return
+	}
+	c.flushOutbox(pubKey)
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(statusResponse{Status: "flushed"})
 }

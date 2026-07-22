@@ -23,6 +23,7 @@ type Store struct {
 	Chats      *ChatStore
 	KnownPeers *KnownPeerStore
 	Files      *FileStore
+	Outbox     *OutboxStore
 }
 
 func New(dir string) *Store {
@@ -45,9 +46,20 @@ func New(dir string) *Store {
 		"CREATE TABLE IF NOT EXISTS known_peers (pub_key TEXT PRIMARY KEY, peer_ip TEXT, status TEXT)",
 		"CREATE TABLE IF NOT EXISTS files (id TEXT PRIMARY KEY, data BLOB, msg_id TEXT, created_at TEXT)",
 		"CREATE TABLE IF NOT EXISTS chat_search (msg_id TEXT PRIMARY KEY, from_name TEXT, to_name TEXT, search_text TEXT)",
+		`CREATE TABLE IF NOT EXISTS outbox (
+			id TEXT PRIMARY KEY,
+			target_pub_key TEXT,
+			signal_type TEXT,
+			signal_from TEXT,
+			signal_id TEXT,
+			signal_content BLOB,
+			created_at TEXT,
+			retry_count INTEGER DEFAULT 0
+		)`,
 
 		"CREATE INDEX IF NOT EXISTS idx_chats_created_at ON chats (created_at, id)",
 		"CREATE INDEX IF NOT EXISTS idx_files_msg_id ON files (msg_id)",
+		"CREATE INDEX IF NOT EXISTS idx_outbox_target ON outbox (target_pub_key)",
 	} {
 		if _, err = db.ExecContext(ctx, q); err != nil {
 			panic(fmt.Errorf("store: create table: %w", err))
@@ -58,6 +70,7 @@ func New(dir string) *Store {
 		Chats:      &ChatStore{db: db, cache: gocache.New(10*time.Minute, 1*time.Minute)},
 		KnownPeers: &KnownPeerStore{db: db},
 		Files:      &FileStore{db: db},
+		Outbox:     NewOutboxStore(db),
 	}
 }
 

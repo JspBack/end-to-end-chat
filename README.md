@@ -72,7 +72,7 @@ Without `-addr`, write mode listens for inbound connections and broadcasts stdin
 | `GET` | `/api/messages` | List all messages (id + timestamp) |
 | `GET` | `/api/messages/search?q=` | Search messages by content, from, to, or attachment name (case-insensitive) |
 | `GET` | `/api/messages/{id}` | Get a single message |
-| `POST` | `/api/messages/{pubKey}` | Send a message to a connected peer |
+| `POST` | `/api/messages/{pubKey}` | Send a message to a peer (queued in outbox if offline) |
 | `PUT` | `/api/messages/{id}` | Update your own message (`{"content":"..."}`) |
 | `DELETE` | `/api/messages/{id}` | Delete your own message |
 | `GET` | `/api/files/{id}` | Download a file attachment (raw bytes) |
@@ -81,6 +81,9 @@ Without `-addr`, write mode listens for inbound connections and broadcasts stdin
 | `PUT` | `/admin/peers/{pubKey}/accept` | Accept peer |
 | `PUT` | `/admin/peers/{pubKey}/reject` | Reject peer |
 | `GET` | `/admin/sessions` | List active sessions |
+| `GET` | `/admin/outbox` | List queued outbox entries |
+| `DELETE` | `/admin/outbox/{id}` | Remove a queued outbox entry |
+| `POST` | `/admin/outbox/flush/{pubKey}` | Manually flush queued messages for a peer |
 
 All API endpoints are localhost-only.
 
@@ -91,7 +94,7 @@ All API endpoints are localhost-only.
 | `message` | Chat message payload (from, to, content, time, id, attachments[]) |
 | `delete` | Delete a message by id (only owner) |
 | `update` | Update a message's content by id (only owner) |
-| `file` | Send the message's attachment |
+| `file_meta` | File transfer metadata (name, size, mime type) |
 
 ## Flags
 
