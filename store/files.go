@@ -9,13 +9,15 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/JspBack/end-to-end-chat/keys"
 )
 
 type FileStore struct {
 	db *sql.DB
 }
 
-func (f *FileStore) PutWithID(secret string, id uuid.UUID, msgID string, data []byte) error {
+func (f *FileStore) PutWithID(secret keys.Key, id uuid.UUID, msgID string, data []byte) error {
 	encrypted, err := encryptRaw(secret, data)
 	if err != nil {
 		return fmt.Errorf("store: encrypt file: %w", err)
@@ -28,7 +30,7 @@ func (f *FileStore) PutWithID(secret string, id uuid.UUID, msgID string, data []
 	return nil
 }
 
-func (f *FileStore) Get(secret string, id uuid.UUID) ([]byte, error) {
+func (f *FileStore) Get(secret keys.Key, id uuid.UUID) ([]byte, error) {
 	var encrypted []byte
 	q := "SELECT data FROM files WHERE id = ?"
 	if err := f.db.QueryRowContext(context.Background(), q, id.String()).Scan(&encrypted); err != nil {

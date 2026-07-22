@@ -9,7 +9,6 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,37 +16,46 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/gorilla/websocket"
+
 	"github.com/JspBack/end-to-end-chat/config"
 	"github.com/JspBack/end-to-end-chat/keys"
 	"github.com/JspBack/end-to-end-chat/signal"
-	"github.com/google/uuid"
-	"github.com/gorilla/websocket"
+	"github.com/JspBack/end-to-end-chat/store"
 )
 
 type keyExchangeData struct {
-	PubKey       string `json:"pub_key"`
-	StaticPubKey string `json:"static_pub_key"`
-	ClientName   string `json:"client_name"`
-	Signature    string `json:"signature"`
+	PubKey       keys.Key `json:"pub_key"`
+	StaticPubKey keys.Key `json:"static_pub_key"`
+	ClientName   string   `json:"client_name"`
+	Signature    string   `json:"signature"`
+}
+
+type peerInfo struct {
+	name         string
+	ephemeralKey keys.Key
+	staticPubKey keys.Key
+}
+
+type cipherState struct {
+	key   []byte
+	nonce uint64
 }
 
 type Session struct {
-	mu               sync.RWMutex
-	conn             *websocket.Conn
-	ourName          string
-	ourStaticPubKey  string
-	ourKeys          *keys.Keys
-	peerNameStr      string
-	log              *slog.Logger
-	sendKey          []byte
-	recvKey          []byte
-	sendNonce        uint64
-	recvNonce        uint64
-	peerEphemeralKey string
-	peerStaticPubKey string
-	timeout          time.Duration
-	statusStr        string
-	msgLimiter       *msgLimiter
+	mu         sync.RWMutex
+	conn       *websocket.Conn
+	ourName    string
+	ourStatic  keys.Key
+	ourKeys    *keys.Keys
+	log        *slog.Logger
+	sendr      cipherState
+	recv       cipherState
+	peer       peerInfo
+	timeout    time.Duration
+	stat       store.PeerStatus
+	msgLimiter *msgLimiter
 }
 
 func newSession(
@@ -55,25 +63,25 @@ func newSession(
 	log *slog.Logger, timeout time.Duration, rateLimit int, rateWindow time.Duration,
 ) *Session {
 	return &Session{
-		conn:            conn,
-		ourName:         ourName,
-		ourStaticPubKey: ourKeys.Public,
-		ourKeys:         ourKeys,
-		log:             log,
-		timeout:         timeout,
-		msgLimiter:      newMsgLimiter(rateLimit, rateWindow),
+		conn:       conn,
+		ourName:    ourName,
+		ourStatic:  ourKeys.Public,
+		ourKeys:    ourKeys,
+		log:        log,
+		timeout:    timeout,
+		msgLimiter: newMsgLimiter(rateLimit, rateWindow),
 	}
 }
 
-func (s *Session) doSend(ourEphemeralHex string, sig []byte) error {
+func (s *Session) doSend(ourEphemeral keys.Key, sig []byte) error {
 	data := keyExchangeData{
-		PubKey:       ourEphemeralHex,
-		StaticPubKey: s.ourStaticPubKey,
+		PubKey:       ourEphemeral,
+		StaticPubKey: s.ourStatic,
 		ClientName:   s.ourName,
 		Signature:    base64.StdEncoding.EncodeToString(sig),
 	}
 	inner, _ := json.Marshal(data)
-	payload := signal.New(signal.TypeKeyExchange, s.ourStaticPubKey, uuid.Nil, inner)
+	payload := signal.New(signal.KeyExchange, s.ourStatic, uuid.Nil, inner)
 	_ = s.conn.SetWriteDeadline(time.Now().Add(s.timeout))
 	if err := s.conn.WriteMessage(websocket.TextMessage, payload); err != nil {
 		return fmt.Errorf("session: write: %w", err)
@@ -92,31 +100,34 @@ func (s *Session) doRecv() (keyExchangeData, error) {
 	if err != nil {
 		return keyExchangeData{}, fmt.Errorf("session: parse signal: %w", err)
 	}
-	if sig.Type != signal.TypeKeyExchange {
+	if sig.Type != signal.KeyExchange {
 		return keyExchangeData{}, fmt.Errorf("session: expected key_exchange, got %s", sig.Type)
 	}
 	var data keyExchangeData
 	if err = json.Unmarshal(sig.Content, &data); err != nil {
 		return keyExchangeData{}, fmt.Errorf("session: unmarshal key exchange data: %w", err)
 	}
-	if sig.From != "" {
+
+	if sig.From != keys.NilKey {
 		data.StaticPubKey = sig.From
 	}
+
 	return data, nil
 }
 
 func (s *Session) verifyPeer(peer keyExchangeData) error {
-	if peer.StaticPubKey == "" {
+	var zero keys.Key
+	if peer.StaticPubKey == zero {
 		return errors.New("session: peer sent no static public key")
 	}
-	if peer.StaticPubKey == s.ourStaticPubKey {
+	if peer.StaticPubKey == s.ourStatic {
 		return errors.New("session: cannot connect to self")
 	}
 	sigBytes, err := base64.StdEncoding.DecodeString(peer.Signature)
 	if err != nil {
 		return fmt.Errorf("session: decode peer signature: %w", err)
 	}
-	if !keys.Verify(peer.StaticPubKey, []byte(peer.PubKey), sigBytes) {
+	if !keys.Verify(peer.StaticPubKey, peer.PubKey[:], sigBytes) {
 		return errors.New("session: peer signature verification failed — possible MitM")
 	}
 	return nil
@@ -128,12 +139,16 @@ func (s *Session) deriveKeys(shared []byte, initiator bool, peer keyExchangeData
 
 	s.mu.Lock()
 	if initiator {
-		s.sendKey, s.recvKey = sendKey[:], recvKey[:]
+		s.sendr.key, s.recv.key = sendKey[:], recvKey[:]
 	} else {
-		s.sendKey, s.recvKey = recvKey[:], sendKey[:]
+		s.sendr.key, s.recv.key = recvKey[:], sendKey[:]
 	}
-	s.sendNonce, s.recvNonce = 0, 0
-	s.peerEphemeralKey, s.peerStaticPubKey, s.peerNameStr = peer.PubKey, peer.StaticPubKey, peer.ClientName
+	s.sendr.nonce, s.recv.nonce = 0, 0
+	s.peer = peerInfo{
+		name:         peer.ClientName,
+		ephemeralKey: peer.PubKey,
+		staticPubKey: peer.StaticPubKey,
+	}
 	s.mu.Unlock()
 }
 
@@ -144,12 +159,13 @@ func (s *Session) handshake(ctx context.Context, initiator bool) error {
 		return fmt.Errorf("session: generate key: %w", err)
 	}
 
-	ourEphemeralHex := hex.EncodeToString(ourKey.PublicKey().Bytes())
-	sig := s.ourKeys.Sign([]byte(ourEphemeralHex))
+	var ourEphemeral keys.Key
+	copy(ourEphemeral[:], ourKey.PublicKey().Bytes())
+	sig := s.ourKeys.Sign(ourEphemeral[:])
 
 	var peer keyExchangeData
 	if initiator {
-		if err = s.doSend(ourEphemeralHex, sig); err != nil {
+		if err = s.doSend(ourEphemeral, sig); err != nil {
 			return err
 		}
 		if peer, err = s.doRecv(); err != nil {
@@ -159,7 +175,7 @@ func (s *Session) handshake(ctx context.Context, initiator bool) error {
 		if peer, err = s.doRecv(); err != nil {
 			return err
 		}
-		if err = s.doSend(ourEphemeralHex, sig); err != nil {
+		if err = s.doSend(ourEphemeral, sig); err != nil {
 			return err
 		}
 	}
@@ -168,11 +184,7 @@ func (s *Session) handshake(ctx context.Context, initiator bool) error {
 		return err
 	}
 
-	peerKeyBytes, err := hex.DecodeString(peer.PubKey)
-	if err != nil {
-		return fmt.Errorf("session: decode peer key: %w", err)
-	}
-	peerKey, err := curve.NewPublicKey(peerKeyBytes)
+	peerKey, err := curve.NewPublicKey(peer.PubKey[:])
 	if err != nil {
 		return fmt.Errorf("session: parse peer key: %w", err)
 	}
@@ -186,7 +198,7 @@ func (s *Session) handshake(ctx context.Context, initiator bool) error {
 	s.log.DebugContext(ctx, "handshake done",
 		"remote", s.conn.RemoteAddr(),
 		"peer_name", s.peerName(),
-		"peer_static_pub", peer.StaticPubKey,
+		"peer_static_pub", peer.StaticPubKey.String(),
 	)
 	return nil
 }
@@ -205,14 +217,14 @@ func aesGCM(key []byte) (cipher.AEAD, error) {
 
 func (s *Session) encrypt(plain []byte) ([]byte, error) {
 	s.mu.Lock()
-	if s.sendKey == nil {
+	if s.sendr.key == nil {
 		s.mu.Unlock()
 		return nil, errors.New("session: no key established")
 	}
-	key := s.sendKey
+	key := s.sendr.key
 	nonce := make([]byte, config.NonceSize)
-	binary.BigEndian.PutUint64(nonce[:8], s.sendNonce)
-	s.sendNonce++
+	binary.BigEndian.PutUint64(nonce[:8], s.sendr.nonce)
+	s.sendr.nonce++
 	s.mu.Unlock()
 
 	gcm, err := aesGCM(key)
@@ -233,13 +245,13 @@ func (s *Session) decrypt(data []byte) ([]byte, error) {
 	}
 
 	s.mu.Lock()
-	if s.recvKey == nil {
+	if s.recv.key == nil {
 		s.mu.Unlock()
 		return nil, errors.New("session: no key established")
 	}
-	key := s.recvKey
+	key := s.recv.key
 	expectedNonce := make([]byte, config.NonceSize)
-	binary.BigEndian.PutUint64(expectedNonce[:8], s.recvNonce)
+	binary.BigEndian.PutUint64(expectedNonce[:8], s.recv.nonce)
 	s.mu.Unlock()
 
 	nonce := data[:config.NonceSize]
@@ -260,7 +272,7 @@ func (s *Session) decrypt(data []byte) ([]byte, error) {
 	}
 
 	s.mu.Lock()
-	s.recvNonce++
+	s.recv.nonce++
 	s.mu.Unlock()
 	return plain, nil
 }
@@ -286,43 +298,44 @@ func (s *Session) send(plain []byte) error {
 	return nil
 }
 
-func (s *Session) peerPubKey() string {
+func (s *Session) peerPubKey() keys.Key {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if s.peerStaticPubKey != "" {
-		return s.peerStaticPubKey
+	var zero keys.Key
+	if s.peer.staticPubKey != zero {
+		return s.peer.staticPubKey
 	}
-	return s.peerEphemeralKey
+	return s.peer.ephemeralKey
 }
 
 func (s *Session) peerName() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.peerNameStr
+	return s.peer.name
 }
 
-func (s *Session) status() string {
+func (s *Session) status() store.PeerStatus {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.statusStr
+	return s.stat
 }
 
-func (s *Session) setStatus(status string) {
+func (s *Session) setStatus(status store.PeerStatus) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.statusStr = status
+	s.stat = status
 }
 
 func (s *Session) closeConn() error {
 	s.mu.Lock()
-	for i := range s.sendKey {
-		s.sendKey[i] = 0
+	for i := range s.sendr.key {
+		s.sendr.key[i] = 0
 	}
-	s.sendKey = nil
-	for i := range s.recvKey {
-		s.recvKey[i] = 0
+	s.sendr.key = nil
+	for i := range s.recv.key {
+		s.recv.key[i] = 0
 	}
-	s.recvKey = nil
+	s.recv.key = nil
 	s.mu.Unlock()
 
 	if err := s.conn.Close(); err != nil {

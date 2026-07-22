@@ -6,14 +6,16 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"time"
 
+	"github.com/gorilla/websocket"
+
 	"github.com/JspBack/end-to-end-chat/message"
 	"github.com/JspBack/end-to-end-chat/store"
-	"github.com/gorilla/websocket"
 )
 
 type disconnectedError struct {
@@ -64,7 +66,7 @@ func (c *Client) dialAndHandshake(ctx context.Context, addr string) (*Session, e
 	if c.UseTLS() {
 		scheme = "wss"
 	}
-	u := url.URL{Scheme: scheme, Host: addr, Path: "/transport/" + c.Keys.Public}
+	u := url.URL{Scheme: scheme, Host: addr, Path: "/transport/" + c.Keys.Public.String()}
 
 	dialer := websocket.DefaultDialer
 	if c.UseTLS() {
@@ -103,10 +105,10 @@ func (c *Client) dialAndHandshake(ctx context.Context, addr string) (*Session, e
 
 	if isNew {
 		_ = c.Store.KnownPeers.Add(&store.KnownPeer{
-			PeerIP: addr,
+			PeerIP: net.ParseIP(addr),
 			PubKey: pubKey,
 			Name:   sess.peerName(),
-			Status: store.PeerStatusAccepted,
+			Status: store.Accepted,
 		})
 	}
 
@@ -116,7 +118,7 @@ func (c *Client) dialAndHandshake(ctx context.Context, addr string) (*Session, e
 	}
 
 	if isNew {
-		sess.setStatus(store.PeerStatusPending)
+		sess.setStatus(store.Pending)
 		c.requestPeerInfo(sess)
 	}
 	return sess, nil
@@ -166,12 +168,13 @@ func (c *Client) storeSession(sess *Session) error {
 
 	if peer, err := c.Store.KnownPeers.Get(pubKey); err == nil {
 		sess.setStatus(peer.Status)
+		peer.Name = sess.peerName()
+		_ = c.Store.KnownPeers.Add(peer)
 	} else {
-		sess.setStatus(store.PeerStatusPending)
+		sess.setStatus(store.Pending)
 	}
 
 	c.sessions.Store(pubKey, sess)
-	_ = c.Store.KnownPeers.SetName(pubKey, sess.peerName())
 	c.flushOutbox(pubKey)
 	return nil
 }

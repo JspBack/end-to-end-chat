@@ -10,8 +10,8 @@ import (
 )
 
 type Profile struct {
-	Name       string `json:"name"`
-	ProfilePic string `json:"profile_pic"`
+	Name       string    `json:"name"`
+	ProfilePic uuid.UUID `json:"profile_pic"`
 }
 
 type ProfileStore struct {
@@ -20,7 +20,7 @@ type ProfileStore struct {
 
 func (p *ProfileStore) Get() (*Profile, error) {
 	var prof Profile
-	q := "SELECT COALESCE(name, ''), COALESCE(profile_pic, '') FROM profile WHERE id = 1"
+	q := "SELECT COALESCE(name, ''), COALESCE(profile_pic, '') FROM profile WHERE rowid = 1"
 	err := p.db.QueryRowContext(context.Background(), q).Scan(&prof.Name, &prof.ProfilePic)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -31,33 +31,14 @@ func (p *ProfileStore) Get() (*Profile, error) {
 	return &prof, nil
 }
 
-func (p *ProfileStore) SetName(name string) error {
-	q := "INSERT OR REPLACE INTO profile (id, name, profile_pic) VALUES (1, ?, COALESCE((SELECT profile_pic FROM profile WHERE id = 1), ''))"
-	if _, err := p.db.ExecContext(context.Background(), q, name); err != nil {
-		return fmt.Errorf("store: set profile name: %w", err)
-	}
-	return nil
-}
-
-func (p *ProfileStore) SetProfilePic(fileID uuid.UUID) error {
+func (p *ProfileStore) Update(name string, fileID uuid.UUID) error {
+	_, _ = p.db.ExecContext(context.Background(), "INSERT OR IGNORE INTO profile (rowid) VALUES (1)")
 	idStr := ""
 	if fileID != uuid.Nil {
 		idStr = fileID.String()
 	}
-	q := "INSERT OR REPLACE INTO profile (id, name, profile_pic) VALUES (1, COALESCE((SELECT name FROM profile WHERE id = 1), ''), ?)"
-	if _, err := p.db.ExecContext(context.Background(), q, idStr); err != nil {
-		return fmt.Errorf("store: set profile pic: %w", err)
-	}
-	return nil
-}
-
-func (p *ProfileStore) Set(name string, fileID uuid.UUID) error {
-	idStr := ""
-	if fileID != uuid.Nil {
-		idStr = fileID.String()
-	}
-	q := "INSERT OR REPLACE INTO profile (id, name, profile_pic) VALUES (1, ?, ?)"
-	if _, err := p.db.ExecContext(context.Background(), q, name, idStr); err != nil {
+	_, err := p.db.ExecContext(context.Background(), "UPDATE profile SET name = ?, profile_pic = ? WHERE rowid = 1", name, idStr)
+	if err != nil {
 		return fmt.Errorf("store: set profile: %w", err)
 	}
 	return nil

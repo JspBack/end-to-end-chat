@@ -17,6 +17,9 @@ import (
 	gocache "github.com/patrickmn/go-cache"
 	// sqLite driver.
 	_ "modernc.org/sqlite"
+
+	"github.com/JspBack/end-to-end-chat/config"
+	"github.com/JspBack/end-to-end-chat/keys"
 )
 
 type Store struct {
@@ -62,8 +65,8 @@ func New(dir string) *Store {
 			created_at TEXT,
 			retry_count INTEGER DEFAULT 0
 		)`,
-		"CREATE TABLE IF NOT EXISTS profile (id INTEGER PRIMARY KEY CHECK(id=1), " +
-			"name TEXT NOT NULL DEFAULT '', profile_pic TEXT NOT NULL DEFAULT '')",
+		"CREATE TABLE IF NOT EXISTS profile (name TEXT NOT NULL DEFAULT '', profile_pic TEXT NOT NULL DEFAULT '')",
+
 		"CREATE INDEX IF NOT EXISTS idx_chats_created_at ON chats (created_at, id)",
 		"CREATE INDEX IF NOT EXISTS idx_files_msg_id ON files (msg_id)",
 		"CREATE INDEX IF NOT EXISTS idx_outbox_target ON outbox (target_pub_key)",
@@ -74,20 +77,20 @@ func New(dir string) *Store {
 	}
 
 	return &Store{
-		Chats:      &ChatStore{db: db, cache: gocache.New(10*time.Minute, 1*time.Minute)},
+		Chats:      &ChatStore{db: db, cache: gocache.New(config.CacheDefaultExp, config.CacheCleanUpInterval)},
 		KnownPeers: &KnownPeerStore{db: db},
 		Files:      &FileStore{db: db},
-		Outbox:     NewOutboxStore(db),
+		Outbox:     &OutboxStore{db: db},
 		Profile:    &ProfileStore{db: db},
 	}
 }
 
-func aesKey(secret string) []byte {
-	h := sha512.Sum512([]byte(secret))
-	return h[:32]
+func aesKey(secret keys.Key) []byte {
+	h := sha512.Sum512(secret[:])
+	return h[:config.AesKeySize]
 }
 
-func encryptRaw(secret string, plain []byte) ([]byte, error) {
+func encryptRaw(secret keys.Key, plain []byte) ([]byte, error) {
 	block, err := aes.NewCipher(aesKey(secret))
 	if err != nil {
 		return nil, fmt.Errorf("store: new cipher: %w", err)
@@ -103,7 +106,7 @@ func encryptRaw(secret string, plain []byte) ([]byte, error) {
 	return gcm.Seal(nonce, nonce, plain, nil), nil
 }
 
-func decryptRaw(secret string, data []byte) ([]byte, error) {
+func decryptRaw(secret keys.Key, data []byte) ([]byte, error) {
 	block, err := aes.NewCipher(aesKey(secret))
 	if err != nil {
 		return nil, fmt.Errorf("store: new cipher: %w", err)
@@ -123,7 +126,7 @@ func decryptRaw(secret string, data []byte) ([]byte, error) {
 	return plain, nil
 }
 
-func encrypt(secret string, plain []byte) (string, error) {
+func encrypt(secret keys.Key, plain []byte) (string, error) {
 	raw, err := encryptRaw(secret, plain)
 	if err != nil {
 		return "", err
@@ -131,7 +134,7 @@ func encrypt(secret string, plain []byte) (string, error) {
 	return base64.StdEncoding.EncodeToString(raw), nil
 }
 
-func decrypt(secret, data string) ([]byte, error) {
+func decrypt(secret keys.Key, data string) ([]byte, error) {
 	raw, err := base64.StdEncoding.DecodeString(data)
 	if err != nil {
 		return nil, fmt.Errorf("store: decode base64: %w", err)

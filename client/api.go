@@ -12,11 +12,13 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/google/uuid"
+
 	"github.com/JspBack/end-to-end-chat/config"
+	"github.com/JspBack/end-to-end-chat/keys"
 	"github.com/JspBack/end-to-end-chat/message"
 	"github.com/JspBack/end-to-end-chat/signal"
 	"github.com/JspBack/end-to-end-chat/store"
-	"github.com/google/uuid"
 )
 
 var errNotOwner = errors.New("not the message owner")
@@ -39,7 +41,7 @@ func (c *Client) msgResponse(msg *message.Message) any {
 	from := ""
 	if msg.FromPubKey == c.Keys.Public {
 		from = c.getName()
-	} else if msg.FromPubKey != "" {
+	} else if msg.FromPubKey != keys.NilKey {
 		if peer, err := c.Store.KnownPeers.Get(msg.FromPubKey); err == nil {
 			if peer.Nickname != "" {
 				from = peer.Nickname
@@ -72,10 +74,10 @@ func (c *Client) adminListPeers(w http.ResponseWriter, _ *http.Request) {
 	_ = json.NewEncoder(w).Encode(peers)
 }
 
-func (c *Client) adminUpdatePeerStatus(w http.ResponseWriter, r *http.Request, status string) {
-	pubKey := r.PathValue("pubKey")
-	if pubKey == "" {
-		http.Error(w, "missing pubKey", http.StatusBadRequest)
+func (c *Client) adminUpdatePeerStatus(w http.ResponseWriter, r *http.Request, status store.PeerStatus) {
+	pubKey, err := keys.FromHex(r.PathValue("pubKey"))
+	if err != nil {
+		http.Error(w, "invalid pubKey", http.StatusBadRequest)
 		return
 	}
 
@@ -96,16 +98,16 @@ func (c *Client) adminUpdatePeerStatus(w http.ResponseWriter, r *http.Request, s
 }
 
 func (c *Client) adminSetNickname(w http.ResponseWriter, r *http.Request) {
-	pubKey := r.PathValue("pubKey")
-	if pubKey == "" {
-		http.Error(w, "missing pubKey\n", http.StatusBadRequest)
+	pubKey, err := keys.FromHex(r.PathValue("pubKey"))
+	if err != nil {
+		http.Error(w, "invalid pubKey", http.StatusBadRequest)
 		return
 	}
 
 	var req struct {
 		Nickname string `json:"nickname"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err = json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid body\n", http.StatusBadRequest)
 		return
 	}
@@ -126,8 +128,8 @@ func (c *Client) adminSetNickname(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(peer)
 }
 
-func (c *Client) updateSessionStatus(pubKey, status string) {
-	if status == store.PeerStatusRejected {
+func (c *Client) updateSessionStatus(pubKey keys.Key, status store.PeerStatus) {
+	if status == store.Rejected {
 		if v, loaded := c.sessions.LoadAndDelete(pubKey); loaded {
 			if sess, ok := v.(*Session); ok {
 				_ = sess.closeConn()
@@ -143,11 +145,16 @@ func (c *Client) updateSessionStatus(pubKey, status string) {
 }
 
 func (c *Client) adminAcceptPeer(w http.ResponseWriter, r *http.Request) {
-	pubKey := r.PathValue("pubKey")
-	c.adminUpdatePeerStatus(w, r, store.PeerStatusAccepted)
-	c.updateSessionStatus(pubKey, store.PeerStatusAccepted)
+	pubKey, err := keys.FromHex(r.PathValue("pubKey"))
+	if err != nil {
+		http.Error(w, "invalid pubKey", http.StatusBadRequest)
+		return
+	}
 
-	sig := signal.New(signal.TypePeerAccepted, c.Keys.Public, uuid.Nil, nil)
+	c.adminUpdatePeerStatus(w, r, store.Accepted)
+	c.updateSessionStatus(pubKey, store.Accepted)
+
+	sig := signal.New(signal.PeerAccepted, c.Keys.Public, uuid.Nil, nil)
 	if v, loaded := c.sessions.Load(pubKey); loaded {
 		if sess, ok := v.(*Session); ok {
 			_ = sess.send(sig)
@@ -158,17 +165,22 @@ func (c *Client) adminAcceptPeer(w http.ResponseWriter, r *http.Request) {
 }
 
 func (c *Client) adminRejectPeer(w http.ResponseWriter, r *http.Request) {
-	pubKey := r.PathValue("pubKey")
-	c.adminUpdatePeerStatus(w, r, store.PeerStatusRejected)
-	c.updateSessionStatus(pubKey, store.PeerStatusRejected)
+	pubKey, err := keys.FromHex(r.PathValue("pubKey"))
+	if err != nil {
+		http.Error(w, "invalid pubKey", http.StatusBadRequest)
+		return
+	}
+
+	c.adminUpdatePeerStatus(w, r, store.Rejected)
+	c.updateSessionStatus(pubKey, store.Rejected)
 	c.log.InfoContext(r.Context(), "peer rejected and closed", "pub_key", pubKey)
 }
 
 func (c *Client) adminListSessions(w http.ResponseWriter, _ *http.Request) {
 	type sessionInfo struct {
-		PubKey string `json:"pub_key"`
-		Status string `json:"status"`
-		Name   string `json:"name"`
+		PubKey keys.Key         `json:"pub_key"`
+		Status store.PeerStatus `json:"status"`
+		Name   string           `json:"name"`
 	}
 	out := make([]sessionInfo, 0)
 	c.sessions.Range(func(key, value any) bool {
@@ -176,7 +188,7 @@ func (c *Client) adminListSessions(w http.ResponseWriter, _ *http.Request) {
 		if !ok {
 			return true
 		}
-		pk, ok := key.(string)
+		pk, ok := key.(keys.Key)
 		if !ok {
 			return true
 		}
@@ -237,13 +249,13 @@ func parseMessageForm(r *http.Request, maxSize int64) (string, []message.Attachm
 	return content, atts, nil
 }
 
-func (c *Client) sendAttachments(ctx context.Context, pubKey string, attachments []message.Attachment, msgID string) {
+func (c *Client) sendAttachments(ctx context.Context, pubKey keys.Key, attachments []message.Attachment, msgID uuid.UUID) {
 	v, loaded := c.sessions.Load(pubKey)
 	if !loaded {
 		return
 	}
 	sess, ok := v.(*Session)
-	if !ok || sess.status() != store.PeerStatusAccepted {
+	if !ok || sess.status() != store.Accepted {
 		return
 	}
 	c.log.DebugContext(ctx, "api send files", "count", len(attachments), "msg_id", msgID)
@@ -256,11 +268,12 @@ func (c *Client) sendAttachments(ctx context.Context, pubKey string, attachments
 }
 
 func (c *Client) apiSendMessage(w http.ResponseWriter, r *http.Request) {
-	pubKey := r.PathValue("pubKey")
-	if pubKey == "" {
-		http.Error(w, "missing pubKey\n", http.StatusBadRequest)
+	pubKey, err := keys.FromHex(r.PathValue("pubKey"))
+	if err != nil {
+		http.Error(w, "invalid pubKey", http.StatusBadRequest)
 		return
 	}
+
 	if pubKey == c.Keys.Public {
 		http.Error(w, "cannot message self\n", http.StatusBadRequest)
 		return
@@ -278,17 +291,17 @@ func (c *Client) apiSendMessage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unknown peer\n", http.StatusNotFound)
 		return
 	}
-	if peer.Status == store.PeerStatusRejected {
+	if peer.Status == store.Rejected {
 		http.Error(w, "peer rejected\n", http.StatusForbidden)
 		return
 	}
 
 	sessRaw, sessLoaded := c.sessions.Load(pubKey)
-	peerName := pubKey[:16]
+	peerName := pubKey.String()[:16]
 	if sessLoaded {
 		if sess, ok := sessRaw.(*Session); ok {
 			peerName = sess.peerName()
-			if sess.status() == store.PeerStatusRejected {
+			if sess.status() == store.Rejected {
 				http.Error(w, "peer rejected\n", http.StatusForbidden)
 				return
 			}
@@ -299,7 +312,7 @@ func (c *Client) apiSendMessage(w http.ResponseWriter, r *http.Request) {
 	queued := !sessLoaded
 	if sessLoaded {
 		if sess, ok := sessRaw.(*Session); ok {
-			queued = sess.status() != store.PeerStatusAccepted
+			queued = sess.status() != store.Accepted
 		}
 	}
 
@@ -323,9 +336,8 @@ func (c *Client) apiSendMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if haveFiles {
-		msgID := msg.ID.String()
-		c.sendAttachments(r.Context(), pubKey, attachments, msgID)
-		if storeErr := message.StoreAttachments(c.Store, c.Keys.Private, msgID, attachments); storeErr != nil {
+		c.sendAttachments(r.Context(), pubKey, attachments, msg.ID)
+		if storeErr := message.StoreAttachments(c.Store, c.Keys.Private, msg.ID.String(), attachments); storeErr != nil {
 			c.log.WarnContext(r.Context(), "store attachments failed", "error", storeErr)
 		}
 	}
@@ -532,13 +544,13 @@ func (c *Client) apiGetFile(w http.ResponseWriter, r *http.Request) {
 }
 
 func (c *Client) adminListOutbox(w http.ResponseWriter, _ *http.Request) {
-	entries, err := c.Store.Outbox.GetAllPending()
+	entries, err := c.Store.Outbox.List()
 	if err != nil {
 		http.Error(w, err.Error()+"\n", http.StatusInternalServerError)
 		return
 	}
 	if entries == nil {
-		entries = []store.OutboxEntry{}
+		entries = []store.OutboxSignal{}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(entries)
@@ -559,11 +571,12 @@ func (c *Client) adminDeleteOutboxEntry(w http.ResponseWriter, r *http.Request) 
 }
 
 func (c *Client) adminFlushOutbox(w http.ResponseWriter, r *http.Request) {
-	pubKey := r.PathValue("pubKey")
-	if pubKey == "" {
-		http.Error(w, "missing pubKey\n", http.StatusBadRequest)
+	pubKey, err := keys.FromHex(r.PathValue("pubKey"))
+	if err != nil {
+		http.Error(w, "invalid pubKey", http.StatusBadRequest)
 		return
 	}
+
 	c.flushOutbox(pubKey)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(statusResponse{Status: statusFlushed})
@@ -602,7 +615,7 @@ func (c *Client) adminUpdateProfile(w http.ResponseWriter, r *http.Request) {
 			_ = c.Store.Files.Delete(oldPic)
 		}
 
-		_ = c.Store.Profile.SetProfilePic(fileID)
+		_ = c.Store.Profile.Update(c.getName(), fileID)
 		changed = true
 	}
 
@@ -619,7 +632,7 @@ func (c *Client) adminDeleteProfilePic(w http.ResponseWriter, _ *http.Request) {
 	if info.ProfilePic != uuid.Nil {
 		_ = c.Store.Files.Delete(info.ProfilePic)
 	}
-	_ = c.Store.Profile.SetProfilePic(uuid.Nil)
+	_ = c.Store.Profile.Update(c.getName(), uuid.Nil)
 	c.broadcastInfoChanged()
 
 	w.Header().Set("Content-Type", "application/json")
