@@ -1,16 +1,15 @@
-package test_test
+package store_test
 
 import (
-	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/JspBack/end-to-end-chat/store"
 )
 
 func TestOutboxPutAndGetPending(t *testing.T) {
-	dir := "test_outbox_putget"
+	dir := filepath.Join(t.TempDir(), "test_outbox_putget")
 	s := store.New(dir)
-	defer os.Remove(dbPath(dir))
 
 	rawSignal := []byte(`{"type":"message","from":"alice","content":"hello"}`)
 	id, err := s.Outbox.Put("peer-pubkey", rawSignal, "secret")
@@ -34,9 +33,8 @@ func TestOutboxPutAndGetPending(t *testing.T) {
 }
 
 func TestOutboxGetPendingWrongPeer(t *testing.T) {
-	dir := "test_outbox_wrongpeer"
+	dir := filepath.Join(t.TempDir(), "test_outbox_wrongpeer")
 	s := store.New(dir)
-	defer os.Remove(dbPath(dir))
 
 	rawSignal := []byte(`{"type":"message","content":"hello"}`)
 	_, err := s.Outbox.Put("peer-1", rawSignal, "secret")
@@ -54,9 +52,8 @@ func TestOutboxGetPendingWrongPeer(t *testing.T) {
 }
 
 func TestOutboxMultiplePutsSamePeer(t *testing.T) {
-	dir := "test_outbox_multi"
+	dir := filepath.Join(t.TempDir(), "test_outbox_multi")
 	s := store.New(dir)
-	defer os.Remove(dbPath(dir))
 
 	_, _ = s.Outbox.Put("peer", []byte(`{"type":"message","content":"first"}`), "secret")
 	_, _ = s.Outbox.Put("peer", []byte(`{"type":"message","content":"second"}`), "secret")
@@ -72,9 +69,8 @@ func TestOutboxMultiplePutsSamePeer(t *testing.T) {
 }
 
 func TestOutboxDelete(t *testing.T) {
-	dir := "test_outbox_delete"
+	dir := filepath.Join(t.TempDir(), "test_outbox_delete")
 	s := store.New(dir)
-	defer os.Remove(dbPath(dir))
 
 	id, _ := s.Outbox.Put("peer", []byte(`{"type":"message"}`), "secret")
 	err := s.Outbox.Delete(id)
@@ -89,9 +85,8 @@ func TestOutboxDelete(t *testing.T) {
 }
 
 func TestOutboxDeleteNotFound(t *testing.T) {
-	dir := "test_outbox_delnf"
+	dir := filepath.Join(t.TempDir(), "test_outbox_delnf")
 	s := store.New(dir)
-	defer os.Remove(dbPath(dir))
 
 	err := s.Outbox.Delete("nonexistent-id")
 	if err != nil {
@@ -100,9 +95,8 @@ func TestOutboxDeleteNotFound(t *testing.T) {
 }
 
 func TestOutboxIncrementRetry(t *testing.T) {
-	dir := "test_outbox_retry"
+	dir := filepath.Join(t.TempDir(), "test_outbox_retry")
 	s := store.New(dir)
-	defer os.Remove(dbPath(dir))
 
 	id, _ := s.Outbox.Put("peer", []byte(`{"type":"message"}`), "secret")
 
@@ -127,9 +121,8 @@ func TestOutboxIncrementRetry(t *testing.T) {
 }
 
 func TestOutboxGetAllPending(t *testing.T) {
-	dir := "test_outbox_all"
+	dir := filepath.Join(t.TempDir(), "test_outbox_all")
 	s := store.New(dir)
-	defer os.Remove(dbPath(dir))
 
 	_, _ = s.Outbox.Put("peer-a", []byte(`{"type":"message","content":"a1"}`), "secret")
 	_, _ = s.Outbox.Put("peer-b", []byte(`{"type":"message","content":"b1"}`), "secret")
@@ -156,9 +149,8 @@ func TestOutboxGetAllPending(t *testing.T) {
 }
 
 func TestOutboxGetAllPendingEmpty(t *testing.T) {
-	dir := "test_outbox_allempty"
+	dir := filepath.Join(t.TempDir(), "test_outbox_allempty")
 	s := store.New(dir)
-	defer os.Remove(dbPath(dir))
 
 	entries, err := s.Outbox.GetAllPending()
 	if err != nil {
@@ -170,9 +162,8 @@ func TestOutboxGetAllPendingEmpty(t *testing.T) {
 }
 
 func TestOutboxEncryption(t *testing.T) {
-	dir := "test_outbox_enc"
+	dir := filepath.Join(t.TempDir(), "test_outbox_enc")
 	s := store.New(dir)
-	defer os.Remove(dbPath(dir))
 
 	rawSignal := []byte(`{"type":"message","content":"secret message"}`)
 	_, err := s.Outbox.Put("peer", rawSignal, "correct-key")
@@ -198,9 +189,8 @@ func TestOutboxEncryption(t *testing.T) {
 }
 
 func TestOutboxOrderPreserved(t *testing.T) {
-	dir := "test_outbox_order"
+	dir := filepath.Join(t.TempDir(), "test_outbox_order")
 	s := store.New(dir)
-	defer os.Remove(dbPath(dir))
 
 	msgs := []string{"first", "second", "third"}
 	for _, m := range msgs {

@@ -1,4 +1,4 @@
-package test_test
+package store_test
 
 import (
 	"os"
@@ -9,18 +9,9 @@ import (
 	"github.com/JspBack/end-to-end-chat/store"
 )
 
-func dbPath(dir string) string {
-	exe, err := os.Executable()
-	if err != nil {
-		panic(err)
-	}
-	return filepath.Join(filepath.Dir(exe), dir+".db")
-}
-
 func TestStorePutGet(t *testing.T) {
-	dir := "test_putget"
+	dir := filepath.Join(t.TempDir(), "test_putget")
 	s := store.New(dir)
-	defer os.Remove(dbPath(dir))
 
 	id, err := s.Chats.Put("hello world", "secret")
 	if err != nil {
@@ -40,9 +31,8 @@ func TestStorePutGet(t *testing.T) {
 }
 
 func TestStoreGetWrongSecret(t *testing.T) {
-	dir := "test_wrongsecret"
+	dir := filepath.Join(t.TempDir(), "test_wrongsecret")
 	s := store.New(dir)
-	defer os.Remove(dbPath(dir))
 
 	id, err := s.Chats.Put("secret message", "correct")
 	if err != nil {
@@ -56,9 +46,8 @@ func TestStoreGetWrongSecret(t *testing.T) {
 }
 
 func TestStoreGetNotFound(t *testing.T) {
-	dir := "test_notfound"
+	dir := filepath.Join(t.TempDir(), "test_notfound")
 	s := store.New(dir)
-	defer os.Remove(dbPath(dir))
 
 	_, err := s.Chats.Get("nonexistent-id", "secret")
 	if !os.IsNotExist(err) {
@@ -67,9 +56,8 @@ func TestStoreGetNotFound(t *testing.T) {
 }
 
 func TestStoreUpdate(t *testing.T) {
-	dir := "test_update"
+	dir := filepath.Join(t.TempDir(), "test_update")
 	s := store.New(dir)
-	defer os.Remove(dbPath(dir))
 
 	id, err := s.Chats.Put("old value", "secret")
 	if err != nil {
@@ -91,9 +79,8 @@ func TestStoreUpdate(t *testing.T) {
 }
 
 func TestStoreUpdateNotFound(t *testing.T) {
-	dir := "test_updatenf"
+	dir := filepath.Join(t.TempDir(), "test_updatenf")
 	s := store.New(dir)
-	defer os.Remove(dbPath(dir))
 
 	err := s.Chats.Update("nonexistent", "value", "secret")
 	if !os.IsNotExist(err) {
@@ -102,9 +89,8 @@ func TestStoreUpdateNotFound(t *testing.T) {
 }
 
 func TestStoreList(t *testing.T) {
-	dir := "test_list"
+	dir := filepath.Join(t.TempDir(), "test_list")
 	s := store.New(dir)
-	defer os.Remove(dbPath(dir))
 
 	id1, _ := s.Chats.Put("msg1", "secret")
 	id2, _ := s.Chats.Put("msg2", "secret")
@@ -132,9 +118,8 @@ func TestStoreList(t *testing.T) {
 }
 
 func TestStoreDelete(t *testing.T) {
-	dir := "test_delete"
+	dir := filepath.Join(t.TempDir(), "test_delete")
 	s := store.New(dir)
-	defer os.Remove(dbPath(dir))
 
 	id, _ := s.Chats.Put("to delete", "secret")
 	err := s.Chats.Delete(id)
@@ -149,9 +134,8 @@ func TestStoreDelete(t *testing.T) {
 }
 
 func TestStorePutWithID(t *testing.T) {
-	dir := "test_putwithid"
+	dir := filepath.Join(t.TempDir(), "test_putwithid")
 	s := store.New(dir)
-	defer os.Remove(dbPath(dir))
 
 	err := s.Chats.PutWithID("custom-id", "custom value", "secret")
 	if err != nil {
@@ -168,9 +152,8 @@ func TestStorePutWithID(t *testing.T) {
 }
 
 func TestStoreReplaceWithPutWithID(t *testing.T) {
-	dir := "test_replace"
+	dir := filepath.Join(t.TempDir(), "test_replace")
 	s := store.New(dir)
-	defer os.Remove(dbPath(dir))
 
 	s.Chats.PutWithID("same-id", "first", "secret")
 	s.Chats.PutWithID("same-id", "second", "secret")
@@ -185,9 +168,8 @@ func TestStoreReplaceWithPutWithID(t *testing.T) {
 }
 
 func TestStoreListEmpty(t *testing.T) {
-	dir := "test_listempty"
+	dir := filepath.Join(t.TempDir(), "test_listempty")
 	s := store.New(dir)
-	defer os.Remove(dbPath(dir))
 
 	list, err := s.Chats.List()
 	if err != nil {
@@ -199,9 +181,8 @@ func TestStoreListEmpty(t *testing.T) {
 }
 
 func TestStoreDeleteNotFound(t *testing.T) {
-	dir := "test_delnotfound"
+	dir := filepath.Join(t.TempDir(), "test_delnotfound")
 	s := store.New(dir)
-	defer os.Remove(dbPath(dir))
 
 	err := s.Chats.Delete("nonexistent")
 	if err != nil {
@@ -210,9 +191,8 @@ func TestStoreDeleteNotFound(t *testing.T) {
 }
 
 func TestStoreMultiplePutsListOrder(t *testing.T) {
-	dir := "test_listorder"
+	dir := filepath.Join(t.TempDir(), "test_listorder")
 	s := store.New(dir)
-	defer os.Remove(dbPath(dir))
 
 	s.Chats.Put("first", "sec")
 	s.Chats.Put("second", "sec")
@@ -228,9 +208,8 @@ func TestStoreMultiplePutsListOrder(t *testing.T) {
 }
 
 func TestStoreEncryptDifferentKeys(t *testing.T) {
-	dir := "test_encdiff"
+	dir := filepath.Join(t.TempDir(), "test_encdiff")
 	s := store.New(dir)
-	defer os.Remove(dbPath(dir))
 
 	id, err := s.Chats.Put("secret data", "key1")
 	if err != nil {
@@ -252,9 +231,8 @@ func TestStoreEncryptDifferentKeys(t *testing.T) {
 }
 
 func TestStoreLongValue(t *testing.T) {
-	dir := "test_longval"
+	dir := filepath.Join(t.TempDir(), "test_longval")
 	s := store.New(dir)
-	defer os.Remove(dbPath(dir))
 
 	val := strings.Repeat("x", 100000)
 
@@ -273,9 +251,8 @@ func TestStoreLongValue(t *testing.T) {
 }
 
 func TestStoreRepeatedPutSameContent(t *testing.T) {
-	dir := "test_repeat"
+	dir := filepath.Join(t.TempDir(), "test_repeat")
 	s := store.New(dir)
-	defer os.Remove(dbPath(dir))
 
 	id1, _ := s.Chats.Put("same", "secret")
 	id2, _ := s.Chats.Put("same", "secret")
@@ -292,9 +269,8 @@ func TestStoreRepeatedPutSameContent(t *testing.T) {
 }
 
 func TestStoreIndexSearch(t *testing.T) {
-	dir := "test_idx_search"
+	dir := filepath.Join(t.TempDir(), "test_idx_search")
 	s := store.New(dir)
-	defer os.Remove(dbPath(dir))
 
 	s.Chats.IndexSearch("msg-1", "alice", "bob", "hello world")
 	s.Chats.IndexSearch("msg-2", "charlie", "dave", "golang programming")
@@ -326,9 +302,8 @@ func TestStoreIndexSearch(t *testing.T) {
 }
 
 func TestStoreIndexSearchLimit(t *testing.T) {
-	dir := "test_idx_search_lim"
+	dir := filepath.Join(t.TempDir(), "test_idx_search_lim")
 	s := store.New(dir)
-	defer os.Remove(dbPath(dir))
 
 	s.Chats.IndexSearch("m1", "a", "b", "match this")
 	s.Chats.IndexSearch("m2", "c", "d", "match that")
@@ -344,9 +319,8 @@ func TestStoreIndexSearchLimit(t *testing.T) {
 }
 
 func TestStoreIndexDelete(t *testing.T) {
-	dir := "test_idx_del"
+	dir := filepath.Join(t.TempDir(), "test_idx_del")
 	s := store.New(dir)
-	defer os.Remove(dbPath(dir))
 
 	s.Chats.IndexSearch("msg-del", "alice", "bob", "delete me")
 	s.Chats.Delete("msg-del")

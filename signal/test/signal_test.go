@@ -1,4 +1,4 @@
-package test_test
+package signal_test
 
 import (
 	"encoding/json"

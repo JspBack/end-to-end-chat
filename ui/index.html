@@ -41,7 +41,7 @@ td button { margin: 0 2px; padding: 4px 8px; font-size: 0.75rem; }
 
 <div class="section section-peers">
   <h2>Peers</h2>
-  <table><thead><tr><th>pubkey</th><th>addr</th><th>status</th><th></th></tr></thead><tbody id="peers"></tbody></table>
+  <table><thead><tr><th>pubkey</th><th>addr</th><th>status</th><th>online</th><th>last seen</th><th></th></tr></thead><tbody id="peers"></tbody></table>
 </div>
 
 <div class="section section-sessions">
@@ -95,7 +95,9 @@ async function loadPeers() {
   const data = await api('/admin/peers') || [];
   document.getElementById('peers').innerHTML = data.map(p => `<tr>
     <td>${p.pub_key}</td><td>${p.peer_ip}</td><td><span class="badge badge-${p.status}">${p.status}</span></td>
-    <td colspan="2">
+    <td>${p.online ? '<span class="badge" style="background:#e8f5e9;color:#2e7d32">online</span>' : '<span class="badge" style="background:#f5f5f5;color:#999">offline</span>'}</td>
+    <td style="font-size:0.75rem">${p.last_seen || '-'}</td>
+    <td>
       <button type="button" class="btn-success" onclick="updatePeer('${p.pub_key}','accept')">accept</button>
       <button type="button" class="btn-danger" onclick="updatePeer('${p.pub_key}','reject')">reject</button>
     </td>

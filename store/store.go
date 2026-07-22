@@ -27,11 +27,15 @@ type Store struct {
 }
 
 func New(dir string) *Store {
-	exe, err := os.Executable()
-	if err != nil {
-		panic(fmt.Errorf("store: get executable path: %w", err))
+	if !filepath.IsAbs(dir) {
+		exe, err := os.Executable()
+		if err != nil {
+			panic(fmt.Errorf("store: get executable path: %w", err))
+		}
+		dir = filepath.Join(filepath.Dir(exe), dir)
 	}
-	dbPath := filepath.Join(filepath.Dir(exe), dir+".db")
+	dbPath := dir + ".db"
+
 	db, err := sql.Open("sqlite", dbPath+"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)")
 	if err != nil {
 		panic(fmt.Errorf("store: open database: %w", err))
