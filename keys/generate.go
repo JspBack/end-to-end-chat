@@ -33,6 +33,7 @@ var NilKey Key
 func (p Key) String() string {
 	return hex.EncodeToString(p[:])
 }
+
 func (p Key) MarshalJSON() ([]byte, error) {
 	return []byte(`"` + p.String() + `"`), nil
 }
@@ -52,6 +53,7 @@ func FromHex(s string) (Key, error) {
 	copy(k[:], buf)
 	return k, nil
 }
+
 func (p *Key) UnmarshalJSON(b []byte) error {
 	s, err := parseHexQuoted(b)
 	if err != nil {
@@ -64,9 +66,11 @@ func (p *Key) UnmarshalJSON(b []byte) error {
 	*p = k
 	return nil
 }
+
 func (p Key) MarshalBinary() ([]byte, error) {
 	return p[:], nil
 }
+
 func (p *Key) UnmarshalBinary(b []byte) error {
 	if len(b) != len(p) {
 		return fmt.Errorf("keys: unexpected binary length %d", len(b))
@@ -74,9 +78,11 @@ func (p *Key) UnmarshalBinary(b []byte) error {
 	copy(p[:], b)
 	return nil
 }
+
 func (p Key) Value() (driver.Value, error) {
 	return p.String(), nil
 }
+
 func (p *Key) Scan(src any) error {
 	var s string
 	switch v := src.(type) {
@@ -94,6 +100,7 @@ func (p *Key) Scan(src any) error {
 	*p = k
 	return nil
 }
+
 func parseHexQuoted(b []byte) (string, error) {
 	if len(b) < minQuotedHexLen {
 		return "", errors.New("keys: too short for quoted hex")
@@ -103,6 +110,7 @@ func parseHexQuoted(b []byte) (string, error) {
 	}
 	return string(b[1 : len(b)-1]), nil
 }
+
 func generateRandomSeed() []byte {
 	seed := make([]byte, ed25519.SeedSize)
 	if _, err := rand.Read(seed); err != nil {
@@ -110,6 +118,7 @@ func generateRandomSeed() []byte {
 	}
 	return seed
 }
+
 func keysDir() string {
 	exe, err := os.Executable()
 	if err != nil {
@@ -117,6 +126,7 @@ func keysDir() string {
 	}
 	return filepath.Dir(exe)
 }
+
 func findExistingKey(dir string) string {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -129,6 +139,7 @@ func findExistingKey(dir string) string {
 	}
 	return ""
 }
+
 func AutoLoad() *Keys {
 	dir := keysDir()
 	if path := findExistingKey(dir); path != "" {
@@ -165,12 +176,15 @@ func AutoLoad() *Keys {
 	}
 	return k
 }
+
 func (k *Keys) Sign(msg []byte) []byte {
 	return ed25519.Sign(k.sign, msg)
 }
+
 func Verify(pubKey PubKey, msg, sig []byte) bool {
 	return ed25519.Verify(pubKey[:], msg, sig)
 }
+
 func (k *Keys) Derive() string {
 	h := sha256.Sum256(k.Private[:])
 	return hex.EncodeToString(h[:8])

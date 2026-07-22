@@ -154,7 +154,12 @@ func (c *Client) adminAcceptPeer(w http.ResponseWriter, r *http.Request) {
 	c.adminUpdatePeerStatus(w, r, store.Accepted)
 	c.updateSessionStatus(pubKey, store.Accepted)
 
-	sig := signal.New(signal.PeerAccepted, c.Keys.Public, uuid.Nil, nil)
+	sig, sigErr := signal.New(signal.PeerAccepted, c.Keys.Public, uuid.Nil, nil)
+	if sigErr != nil {
+		c.log.ErrorContext(r.Context(), "client: accept:", "error", err)
+		http.Error(w, "an error happened", http.StatusInternalServerError)
+		return
+	}
 	if v, loaded := c.sessions.Load(pubKey); loaded {
 		if sess, ok := v.(*Session); ok {
 			_ = sess.send(sig)

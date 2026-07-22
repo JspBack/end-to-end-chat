@@ -60,10 +60,9 @@ func (t *ChatStore) CacheLoad(id uuid.UUID) (string, bool) {
 }
 
 func (t *ChatStore) Get(id uuid.UUID, secret keys.Key) (string, error) {
-	idStr := id.String()
 	var encrypted string
 	q := "SELECT value FROM chats WHERE id = ?"
-	if err := t.db.QueryRowContext(context.Background(), q, idStr).Scan(&encrypted); err != nil {
+	if err := t.db.QueryRowContext(context.Background(), q, id.String()).Scan(&encrypted); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", os.ErrNotExist
 		}
@@ -77,10 +76,9 @@ func (t *ChatStore) Get(id uuid.UUID, secret keys.Key) (string, error) {
 }
 
 func (t *ChatStore) Update(id uuid.UUID, value string, secret keys.Key) error {
-	idStr := id.String()
 	var exists bool
 	q := "SELECT EXISTS(SELECT 1 FROM chats WHERE id = ?)"
-	if err := t.db.QueryRowContext(context.Background(), q, idStr).Scan(&exists); err != nil {
+	if err := t.db.QueryRowContext(context.Background(), q, id.String()).Scan(&exists); err != nil {
 		return fmt.Errorf("store: update check: %w", err)
 	}
 	if !exists {
@@ -99,11 +97,20 @@ func (t *ChatStore) List() ([]ChatSummary, error) {
 
 	var out []ChatSummary
 	for rows.Next() {
-		var s ChatSummary
-		if err = rows.Scan(&s.ID, &s.CreatedAt); err != nil {
+		var id string
+		var createdAt string
+		if err = rows.Scan(&id, &createdAt); err != nil {
 			return nil, fmt.Errorf("store: scan: %w", err)
 		}
-		out = append(out, s)
+		parsedID, idErr := uuid.Parse(id)
+		if idErr != nil {
+			return nil, fmt.Errorf("store: parse id: %w", idErr)
+		}
+		parsedTime, timeErr := time.Parse(time.RFC3339, createdAt)
+		if timeErr != nil {
+			return nil, fmt.Errorf("store: parse created_at: %w", timeErr)
+		}
+		out = append(out, ChatSummary{ID: parsedID, CreatedAt: parsedTime})
 	}
 	if err = rows.Err(); err != nil {
 		return nil, fmt.Errorf("store: list rows: %w", err)

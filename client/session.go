@@ -7,9 +7,7 @@ import (
 	"crypto/ecdh"
 	"crypto/rand"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -26,10 +24,59 @@ import (
 )
 
 type keyExchangeData struct {
-	PubKey       keys.Key `json:"pub_key"`
-	StaticPubKey keys.Key `json:"static_pub_key"`
-	ClientName   string   `json:"client_name"`
-	Signature    string   `json:"signature"`
+	PubKey       keys.Key
+	StaticPubKey keys.Key
+	ClientName   string
+	Signature    []byte
+}
+
+func encodeKeyExchange(d keyExchangeData) []byte {
+	nameBytes := []byte(d.ClientName)
+	buf := make([]byte, config.AesKeySize*2+2+len(nameBytes)+2+len(d.Signature))
+
+	off := 0
+	copy(buf[off:], d.PubKey[:])
+	off += config.AesKeySize
+	copy(buf[off:], d.StaticPubKey[:])
+	off += config.AesKeySize
+	binary.BigEndian.PutUint16(buf[off:], u16Len(len(nameBytes)))
+	off += 2
+	copy(buf[off:], nameBytes)
+	off += len(nameBytes)
+	binary.BigEndian.PutUint16(buf[off:], u16Len(len(d.Signature)))
+	off += 2
+	copy(buf[off:], d.Signature)
+
+	return buf
+}
+
+func decodeKeyExchange(data []byte) (keyExchangeData, error) {
+	var d keyExchangeData
+	if len(data) < config.AesKeySize*2+2 {
+		return d, errors.New("session: key exchange data too short")
+	}
+	off := 0
+	copy(d.PubKey[:], data[off:off+config.AesKeySize])
+	off += config.AesKeySize
+	copy(d.StaticPubKey[:], data[off:off+config.AesKeySize])
+	off += config.AesKeySize
+
+	nameLen := int(binary.BigEndian.Uint16(data[off:]))
+	off += 2
+	if len(data) < off+nameLen+2 {
+		return d, errors.New("session: key exchange data truncated at name")
+	}
+	d.ClientName = string(data[off : off+nameLen])
+	off += nameLen
+
+	sigLen := int(binary.BigEndian.Uint16(data[off:]))
+	off += 2
+	if len(data) < off+sigLen {
+		return d, errors.New("session: key exchange data truncated at signature")
+	}
+	d.Signature = data[off : off+sigLen]
+
+	return d, nil
 }
 
 type peerInfo struct {
@@ -74,16 +121,18 @@ func newSession(
 }
 
 func (s *Session) doSend(ourEphemeral keys.Key, sig []byte) error {
-	data := keyExchangeData{
+	inner := encodeKeyExchange(keyExchangeData{
 		PubKey:       ourEphemeral,
 		StaticPubKey: s.ourStatic,
 		ClientName:   s.ourName,
-		Signature:    base64.StdEncoding.EncodeToString(sig),
+		Signature:    sig,
+	})
+	payload, err := signal.New(signal.KeyExchange, s.ourStatic, uuid.Nil, inner)
+	if err != nil {
+		return fmt.Errorf("session: signal: %w", err)
 	}
-	inner, _ := json.Marshal(data)
-	payload := signal.New(signal.KeyExchange, s.ourStatic, uuid.Nil, inner)
 	_ = s.conn.SetWriteDeadline(time.Now().Add(s.timeout))
-	if err := s.conn.WriteMessage(websocket.TextMessage, payload); err != nil {
+	if err = s.conn.WriteMessage(websocket.BinaryMessage, payload); err != nil {
 		return fmt.Errorf("session: write: %w", err)
 	}
 	return nil
@@ -103,9 +152,9 @@ func (s *Session) doRecv() (keyExchangeData, error) {
 	if sig.Type != signal.KeyExchange {
 		return keyExchangeData{}, fmt.Errorf("session: expected key_exchange, got %s", sig.Type)
 	}
-	var data keyExchangeData
-	if err = json.Unmarshal(sig.Content, &data); err != nil {
-		return keyExchangeData{}, fmt.Errorf("session: unmarshal key exchange data: %w", err)
+	data, err := decodeKeyExchange(sig.Content)
+	if err != nil {
+		return keyExchangeData{}, fmt.Errorf("session: decode key exchange: %w", err)
 	}
 
 	if sig.From != keys.NilKey {
@@ -123,11 +172,7 @@ func (s *Session) verifyPeer(peer keyExchangeData) error {
 	if peer.StaticPubKey == s.ourStatic {
 		return errors.New("session: cannot connect to self")
 	}
-	sigBytes, err := base64.StdEncoding.DecodeString(peer.Signature)
-	if err != nil {
-		return fmt.Errorf("session: decode peer signature: %w", err)
-	}
-	if !keys.Verify(peer.StaticPubKey, peer.PubKey[:], sigBytes) {
+	if !keys.Verify(peer.StaticPubKey, peer.PubKey[:], peer.Signature) {
 		return errors.New("session: peer signature verification failed — possible MitM")
 	}
 	return nil

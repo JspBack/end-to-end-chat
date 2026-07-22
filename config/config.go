@@ -25,7 +25,7 @@ const (
 	DefaultPingWindow          = 5 * time.Second
 	PubKeyLen                  = 64
 	FileChunkSize              = 256 << 10
-	FileIDLen                  = 36
+	FileIDLen                  = 16
 	NonceSize                  = 12
 	AesKeySize                 = 32
 	MultipartMemBuf            = 10 << 20
@@ -44,9 +44,8 @@ type Config struct {
 	PingWindow     time.Duration
 	CertFile       string
 	KeyFileTLS     string
-
-	PeerAddr  string
-	WriteMode bool
+	PeerAddr       string
+	WriteMode      bool
 }
 
 func sanitizeName(s string) string {

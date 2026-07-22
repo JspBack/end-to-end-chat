@@ -35,10 +35,8 @@ func (o *OutboxStore) Put(targetPubKey keys.Key, rawSignalBytes []byte, secret k
 	}
 	var meta signal.Signal
 	_ = json.Unmarshal(rawSignalBytes, &meta)
-
 	id := uuid.New()
 	now := time.Now().UTC().Format(time.RFC3339)
-
 	q := `INSERT INTO outbox (id, target_pub_key, signal_type, signal_from, signal_id, signal_content, created_at)
 	      VALUES (?, ?, ?, ?, ?, ?, ?)`
 	if _, err = o.db.ExecContext(context.Background(), q, id.String(), targetPubKey.String(),
@@ -56,14 +54,19 @@ func (o *OutboxStore) Get(targetPubKey, secret keys.Key) ([]OutboxSignal, error)
 		return nil, fmt.Errorf("store: outbox get: %w", err)
 	}
 	defer rows.Close()
-
 	var out []OutboxSignal
 	for rows.Next() {
 		var e OutboxSignal
 		var enc []byte
-		if err = rows.Scan(&e.ID, &e.TargetPubKey, &e.SignalType, &e.SignalFrom, &e.SignalID, &enc, &e.CreatedAt, &e.RetryCount); err != nil {
+		var createdAt string
+		if err = rows.Scan(&e.ID, &e.TargetPubKey, &e.SignalType, &e.SignalFrom, &e.SignalID, &enc, &createdAt, &e.RetryCount); err != nil {
 			return nil, fmt.Errorf("store: outbox scan: %w", err)
 		}
+		parsedTime, timeErr := time.Parse(time.RFC3339, createdAt)
+		if timeErr != nil {
+			return nil, fmt.Errorf("store: outbox parse created_at: %w", timeErr)
+		}
+		e.CreatedAt = parsedTime
 		plain, decErr := decryptRaw(secret, enc)
 		if decErr != nil {
 			return nil, fmt.Errorf("store: outbox decrypt: %w", decErr)
@@ -84,13 +87,18 @@ func (o *OutboxStore) List() ([]OutboxSignal, error) {
 		return nil, fmt.Errorf("store: outbox list: %w", err)
 	}
 	defer rows.Close()
-
 	var out []OutboxSignal
 	for rows.Next() {
 		var e OutboxSignal
-		if err = rows.Scan(&e.ID, &e.TargetPubKey, &e.SignalType, &e.SignalFrom, &e.SignalID, &e.CreatedAt, &e.RetryCount); err != nil {
+		var createdAt string
+		if err = rows.Scan(&e.ID, &e.TargetPubKey, &e.SignalType, &e.SignalFrom, &e.SignalID, &createdAt, &e.RetryCount); err != nil {
 			return nil, fmt.Errorf("store: outbox scan: %w", err)
 		}
+		parsedTime, timeErr := time.Parse(time.RFC3339, createdAt)
+		if timeErr != nil {
+			return nil, fmt.Errorf("store: outbox parse created_at: %w", timeErr)
+		}
+		e.CreatedAt = parsedTime
 		out = append(out, e)
 	}
 	if err = rows.Err(); err != nil {

@@ -156,7 +156,12 @@ async function viewMessage(id) {
   const msg = await api(`/api/messages/${id}`);
   const attHtml = msg.attachments?.length
     ? `<div style="margin:8px 0"><b>Attachments:</b><ul>${msg.attachments.map(a =>
-        `<li><a href="/api/files/${a.id}" download="${escapeHtml(a.name)}"><button type="button">${escapeHtml(a.name)}</button></a></li>`
+        `<li>
+           <a href="/api/files/${a.id}" download="${escapeHtml(a.name)}" class="btn-success"
+              style="display:inline-block;text-decoration:none;padding:4px 8px;border-radius:4px;font-size:0.75rem;font-family:system-ui,sans-serif;">
+             install attachment (${escapeHtml(a.name)})
+           </a>
+         </li>`
       ).join('')}</ul></div>`
     : '';
   const detail = document.getElementById('message-detail');
@@ -301,7 +306,7 @@ async function deleteProfilePic() {
 async function refreshAll() {
   await Promise.all([loadPeers(), loadSessions(), loadOutbox(), loadMessages(), loadProfile()]);
 }
-function escapeHtml(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function escapeHtml(s) { return (s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 window.setNickname = setNickname;
 window.updatePeer = updatePeer;
 window.connectPeer = connectPeer;
