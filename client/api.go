@@ -17,6 +17,8 @@ import (
 	"github.com/google/uuid"
 )
 
+var errNotOwner = errors.New("not the message owner")
+
 type statusResponse struct {
 	Status string `json:"status"`
 }
@@ -331,6 +333,17 @@ func (c *Client) apiSearchMessages(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(results)
 }
 
+func (c *Client) getOwnedMessage(id string) (*message.Message, error) {
+	msg, err := message.Get(c.Store, c.Keys.Private, id)
+	if err != nil {
+		return nil, fmt.Errorf("get message: %w", err)
+	}
+	if msg.From != c.Name {
+		return nil, errNotOwner
+	}
+	return msg, nil
+}
+
 func (c *Client) apiUpdateMessage(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
@@ -338,14 +351,13 @@ func (c *Client) apiUpdateMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	msg, err := message.Get(c.Store, c.Keys.Private, id)
-	if err != nil {
-		http.Error(w, err.Error()+"\n", http.StatusNotFound)
+	msg, err := c.getOwnedMessage(id)
+	if errors.Is(err, errNotOwner) {
+		http.Error(w, "cannot edit another user's message\n", http.StatusForbidden)
 		return
 	}
-
-	if msg.From != c.Name {
-		http.Error(w, "cannot edit another user's message\n", http.StatusForbidden)
+	if err != nil {
+		http.Error(w, err.Error()+"\n", http.StatusNotFound)
 		return
 	}
 
@@ -373,6 +385,34 @@ func (c *Client) apiUpdateMessage(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(statusResponse{Status: "updated"})
 }
 
+func (c *Client) apiDeleteMessage(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		http.Error(w, "missing id\n", http.StatusBadRequest)
+		return
+	}
+
+	_, err := c.getOwnedMessage(id)
+	if errors.Is(err, errNotOwner) {
+		http.Error(w, "cannot delete another user's message\n", http.StatusForbidden)
+		return
+	}
+	if err != nil {
+		http.Error(w, err.Error()+"\n", http.StatusNotFound)
+		return
+	}
+
+	if delErr := message.Delete(c.Store, c.Keys.Private, id); delErr != nil {
+		http.Error(w, delErr.Error()+"\n", http.StatusInternalServerError)
+		return
+	}
+
+	c.broadcastDelete(id)
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(statusResponse{Status: "deleted"})
+}
+
 func (c *Client) apiGetFile(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
@@ -389,35 +429,6 @@ func (c *Client) apiGetFile(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Length", strconv.Itoa(len(raw)))
 	_, _ = w.Write(raw)
-}
-
-func (c *Client) apiDeleteMessage(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	if id == "" {
-		http.Error(w, "missing id\n", http.StatusBadRequest)
-		return
-	}
-
-	msg, err := message.Get(c.Store, c.Keys.Private, id)
-	if err != nil {
-		http.Error(w, err.Error()+"\n", http.StatusNotFound)
-		return
-	}
-
-	if msg.From != c.Name {
-		http.Error(w, "cannot delete another user's message\n", http.StatusForbidden)
-		return
-	}
-
-	if delErr := message.Delete(c.Store, c.Keys.Private, id); delErr != nil {
-		http.Error(w, delErr.Error()+"\n", http.StatusInternalServerError)
-		return
-	}
-
-	c.broadcastDelete(id)
-
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(statusResponse{Status: "deleted"})
 }
 
 func (c *Client) adminListOutbox(w http.ResponseWriter, _ *http.Request) {
