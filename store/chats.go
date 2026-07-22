@@ -23,24 +23,24 @@ type ChatSummary struct {
 }
 
 func (t *ChatStore) Put(value, secret string) (string, error) {
-	id := uuid.New().String()
+	id := uuid.New()
 	if err := t.PutWithID(id, value, secret); err != nil {
 		return "", err
 	}
-	return id, nil
+	return id.String(), nil
 }
 
-func (t *ChatStore) PutWithID(id, value, secret string) error {
+func (t *ChatStore) PutWithID(id uuid.UUID, value, secret string) error {
 	encrypted, err := encrypt(secret, []byte(value))
 	if err != nil {
 		return fmt.Errorf("store: encrypt: %w", err)
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	q := "INSERT OR REPLACE INTO chats (id, value, created_at) VALUES (?, ?, ?)"
-	if _, err = t.db.ExecContext(context.Background(), q, id, encrypted, now); err != nil {
+	if _, err = t.db.ExecContext(context.Background(), q, id.String(), encrypted, now); err != nil {
 		return fmt.Errorf("store: put: %w", err)
 	}
-	t.cache.Delete(id)
+	t.cache.Delete(id.String())
 	return nil
 }
 
@@ -57,10 +57,11 @@ func (t *ChatStore) CacheLoad(id string) (string, bool) {
 	return s, true
 }
 
-func (t *ChatStore) Get(id, secret string) (string, error) {
+func (t *ChatStore) Get(id uuid.UUID, secret string) (string, error) {
+	idStr := id.String()
 	var encrypted string
 	q := "SELECT value FROM chats WHERE id = ?"
-	if err := t.db.QueryRowContext(context.Background(), q, id).Scan(&encrypted); err != nil {
+	if err := t.db.QueryRowContext(context.Background(), q, idStr).Scan(&encrypted); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", os.ErrNotExist
 		}
@@ -73,10 +74,11 @@ func (t *ChatStore) Get(id, secret string) (string, error) {
 	return string(plain), nil
 }
 
-func (t *ChatStore) Update(id, value, secret string) error {
+func (t *ChatStore) Update(id uuid.UUID, value, secret string) error {
+	idStr := id.String()
 	var exists bool
 	q := "SELECT EXISTS(SELECT 1 FROM chats WHERE id = ?)"
-	if err := t.db.QueryRowContext(context.Background(), q, id).Scan(&exists); err != nil {
+	if err := t.db.QueryRowContext(context.Background(), q, idStr).Scan(&exists); err != nil {
 		return fmt.Errorf("store: update check: %w", err)
 	}
 	if !exists {
@@ -151,12 +153,13 @@ func (t *ChatStore) Search(query string, limit int) ([]string, error) {
 	return ids, nil
 }
 
-func (t *ChatStore) Delete(id string) error {
+func (t *ChatStore) Delete(id uuid.UUID) error {
+	idStr := id.String()
 	q := "DELETE FROM chats WHERE id = ?"
-	if _, err := t.db.ExecContext(context.Background(), q, id); err != nil {
+	if _, err := t.db.ExecContext(context.Background(), q, idStr); err != nil {
 		return fmt.Errorf("store: delete: %w", err)
 	}
-	_ = t.deleteSearchIndex(id)
-	t.cache.Delete(id)
+	_ = t.deleteSearchIndex(idStr)
+	t.cache.Delete(idStr)
 	return nil
 }

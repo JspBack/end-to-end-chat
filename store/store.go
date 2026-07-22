@@ -24,6 +24,7 @@ type Store struct {
 	KnownPeers *KnownPeerStore
 	Files      *FileStore
 	Outbox     *OutboxStore
+	Profile    *ProfileStore
 }
 
 func New(dir string) *Store {
@@ -47,7 +48,8 @@ func New(dir string) *Store {
 
 	for _, q := range []string{
 		"CREATE TABLE IF NOT EXISTS chats (id TEXT PRIMARY KEY, value TEXT, created_at TEXT)",
-		"CREATE TABLE IF NOT EXISTS known_peers (pub_key TEXT PRIMARY KEY, peer_ip TEXT, name TEXT, nickname TEXT, status TEXT, last_seen TEXT)",
+		"CREATE TABLE IF NOT EXISTS known_peers (pub_key TEXT PRIMARY KEY, peer_ip TEXT, " +
+			"name TEXT, nickname TEXT, status TEXT, last_seen TEXT, profile_pic TEXT)",
 		"CREATE TABLE IF NOT EXISTS files (id TEXT PRIMARY KEY, data BLOB, msg_id TEXT, created_at TEXT)",
 		"CREATE TABLE IF NOT EXISTS chat_search (msg_id TEXT PRIMARY KEY, from_name TEXT, to_name TEXT, search_text TEXT)",
 		`CREATE TABLE IF NOT EXISTS outbox (
@@ -60,7 +62,8 @@ func New(dir string) *Store {
 			created_at TEXT,
 			retry_count INTEGER DEFAULT 0
 		)`,
-
+		"CREATE TABLE IF NOT EXISTS profile (id INTEGER PRIMARY KEY CHECK(id=1), " +
+			"name TEXT NOT NULL DEFAULT '', profile_pic TEXT NOT NULL DEFAULT '')",
 		"CREATE INDEX IF NOT EXISTS idx_chats_created_at ON chats (created_at, id)",
 		"CREATE INDEX IF NOT EXISTS idx_files_msg_id ON files (msg_id)",
 		"CREATE INDEX IF NOT EXISTS idx_outbox_target ON outbox (target_pub_key)",
@@ -75,6 +78,7 @@ func New(dir string) *Store {
 		KnownPeers: &KnownPeerStore{db: db},
 		Files:      &FileStore{db: db},
 		Outbox:     NewOutboxStore(db),
+		Profile:    &ProfileStore{db: db},
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 
 	"github.com/JspBack/end-to-end-chat/message"
 	"github.com/JspBack/end-to-end-chat/store"
+	"github.com/google/uuid"
 )
 
 func TestNewMessage(t *testing.T) {
@@ -53,16 +54,17 @@ func TestToMessageInvalid(t *testing.T) {
 	}
 }
 
-func TestNewMessageIDEmpty(t *testing.T) {
+func TestNewMessageIDNotEmpty(t *testing.T) {
 	m := message.NewMessage("bob", "hello")
-	if m.ID != "" {
-		t.Errorf("ID = %q, want empty", m.ID)
+	if m.ID == uuid.Nil {
+		t.Error("NewMessage should set a non-nil ID")
 	}
 }
 
 func TestEncodeDecodePreservesID(t *testing.T) {
 	m := message.NewMessage("b", "c")
-	m.ID = "my-custom-id"
+	customID := uuid.MustParse("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
+	m.ID = customID
 	data, err := m.Encode()
 	if err != nil {
 		t.Fatal("Encode:", err)
@@ -72,16 +74,16 @@ func TestEncodeDecodePreservesID(t *testing.T) {
 	if err != nil {
 		t.Fatal("ToMessage:", err)
 	}
-	if dec.ID != "my-custom-id" {
-		t.Errorf("ID = %q, want %q", dec.ID, "my-custom-id")
+	if dec.ID != customID {
+		t.Errorf("ID = %v, want %v", dec.ID, customID)
 	}
 }
 
 func TestMessageIDOmitEmpty(t *testing.T) {
 	m := &message.Message{To: "b", Content: "c"}
 	data, _ := m.Encode()
-	if idStr := `"id"`; strings.Contains(string(data), idStr) {
-		t.Error("JSON should not contain 'id' when empty")
+	if !strings.Contains(string(data), `"id"`) {
+		t.Error("JSON should contain 'id' field")
 	}
 }
 
@@ -97,11 +99,11 @@ func TestMessagePutGeneratesID(t *testing.T) {
 	if id == "" {
 		t.Fatal("expected non-empty id")
 	}
-	if msg.ID == "" {
-		t.Fatal("Put should set msg.ID when empty")
+	if msg.ID == uuid.Nil {
+		t.Fatal("Put should have a non-nil msg.ID")
 	}
-	if msg.ID != id {
-		t.Errorf("msg.ID = %q, want %q", msg.ID, id)
+	if msg.ID.String() != id {
+		t.Errorf("msg.ID = %q, want %q", msg.ID.String(), id)
 	}
 }
 
@@ -109,17 +111,18 @@ func TestMessagePutReusesID(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "test_put_reuseid")
 	s := store.New(dir)
 
+	customID := uuid.MustParse("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
 	msg := message.NewMessage("bob", "custom id test")
-	msg.ID = "pre-set-id"
+	msg.ID = customID
 	id, err := message.Put(s, "secret", "alice", msg)
 	if err != nil {
 		t.Fatal("Put:", err)
 	}
-	if id != "pre-set-id" {
-		t.Errorf("id = %q, want %q", id, "pre-set-id")
+	if id != customID.String() {
+		t.Errorf("id = %q, want %q", id, customID.String())
 	}
 
-	got, err := message.Get(s, "secret", "pre-set-id")
+	got, err := message.Get(s, "secret", customID)
 	if err != nil {
 		t.Fatal("Get:", err)
 	}
@@ -132,17 +135,18 @@ func TestMessagePutWithIDThenUpdate(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "test_putid_upd")
 	s := store.New(dir)
 
+	fixedID := uuid.MustParse("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
 	msg := message.NewMessage("bob", "original")
-	msg.ID = "fixed-id"
+	msg.ID = fixedID
 	message.Put(s, "secret", "alice", msg)
 
 	msg.Content = "updated"
-	err := message.Update(s, "secret", "fixed-id", "alice", msg)
+	err := message.Update(s, "secret", fixedID, "alice", msg)
 	if err != nil {
 		t.Fatal("Update:", err)
 	}
 
-	got, err := message.Get(s, "secret", "fixed-id")
+	got, err := message.Get(s, "secret", fixedID)
 	if err != nil {
 		t.Fatal("Get:", err)
 	}
@@ -176,7 +180,7 @@ func TestMessageStoreRoundTrip(t *testing.T) {
 		t.Fatal("message.Put:", err)
 	}
 
-	got, err := message.Get(s, "some-secret", id)
+	got, err := message.Get(s, "some-secret", uuid.MustParse(id))
 	if err != nil {
 		t.Fatal("message.Get:", err)
 	}
@@ -225,7 +229,7 @@ func TestMessageStoreGetWithTimestamp(t *testing.T) {
 		t.Fatal("Put:", err)
 	}
 
-	got, err := message.Get(s, "secret", id)
+	got, err := message.Get(s, "secret", uuid.MustParse(id))
 	if err != nil {
 		t.Fatal("Get:", err)
 	}
@@ -246,12 +250,12 @@ func TestMessageUpdate(t *testing.T) {
 	}
 
 	updated := message.NewMessage("bob", "updated")
-	err = message.Update(s, "secret", id, "alice", updated)
+	err = message.Update(s, "secret", uuid.MustParse(id), "alice", updated)
 	if err != nil {
 		t.Fatal("Update:", err)
 	}
 
-	got, err := message.Get(s, "secret", id)
+	got, err := message.Get(s, "secret", uuid.MustParse(id))
 	if err != nil {
 		t.Fatal("Get:", err)
 	}
@@ -270,12 +274,12 @@ func TestMessageDelete(t *testing.T) {
 		t.Fatal("Put:", err)
 	}
 
-	err = message.Delete(s, "secret", id)
+	err = message.Delete(s, "secret", uuid.MustParse(id))
 	if err != nil {
 		t.Fatal("Delete:", err)
 	}
 
-	_, err = message.Get(s, "secret", id)
+	_, err = message.Get(s, "secret", uuid.MustParse(id))
 	if err == nil {
 		t.Error("expected error after delete")
 	}
@@ -289,12 +293,12 @@ func TestMessageUpdateOverwrites(t *testing.T) {
 	id, _ := message.Put(s, "secret", "a", msg1)
 
 	msg2 := message.NewMessage("b", "second")
-	err := message.Update(s, "secret", id, "a", msg2)
+	err := message.Update(s, "secret", uuid.MustParse(id), "a", msg2)
 	if err != nil {
 		t.Fatal("Update:", err)
 	}
 
-	got, err := message.Get(s, "secret", id)
+	got, err := message.Get(s, "secret", uuid.MustParse(id))
 	if err != nil {
 		t.Fatal("Get:", err)
 	}
@@ -314,7 +318,7 @@ func TestMessageUnicode(t *testing.T) {
 		t.Fatal("Put:", err)
 	}
 
-	got, err := message.Get(s, "secret", id)
+	got, err := message.Get(s, "secret", uuid.MustParse(id))
 	if err != nil {
 		t.Fatal("Get:", err)
 	}
@@ -333,7 +337,7 @@ func TestMessageEmptyContent(t *testing.T) {
 		t.Fatal("Put:", err)
 	}
 
-	got, err := message.Get(s, "secret", id)
+	got, err := message.Get(s, "secret", uuid.MustParse(id))
 	if err != nil {
 		t.Fatal("Get:", err)
 	}
@@ -353,7 +357,7 @@ func TestMessageLargeContent(t *testing.T) {
 		t.Fatal("Put:", err)
 	}
 
-	got, err := message.Get(s, "secret", id)
+	got, err := message.Get(s, "secret", uuid.MustParse(id))
 	if err != nil {
 		t.Fatal("Get:", err)
 	}
@@ -470,9 +474,10 @@ func TestAttachmentStoreAndRetrieve(t *testing.T) {
 		Data:     []byte("hello world"),
 	}
 	msg := message.NewMessage("bob", "file", att)
-	msg.ID = "att-test-msg-id"
+	msgID := uuid.MustParse("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
+	msg.ID = msgID
 
-	if err := message.StoreAttachments(s, "secret", msg.ID, msg.Attachments); err != nil {
+	if err := message.StoreAttachments(s, "secret", msg.ID.String(), msg.Attachments); err != nil {
 		t.Fatal("StoreAttachments:", err)
 	}
 
@@ -481,7 +486,7 @@ func TestAttachmentStoreAndRetrieve(t *testing.T) {
 		t.Fatal("Put:", err)
 	}
 
-	got, err := message.Get(s, "secret", id)
+	got, err := message.Get(s, "secret", uuid.MustParse(id))
 	if err != nil {
 		t.Fatal("Get:", err)
 	}
@@ -494,8 +499,8 @@ func TestAttachmentStoreAndRetrieve(t *testing.T) {
 	if len(got.Attachments[0].Data) != 0 {
 		t.Errorf("Data should be nil after storage, got %v", got.Attachments[0].Data)
 	}
-	if got.Attachments[0].ID == "" {
-		t.Fatal("attachment ID should not be empty")
+	if got.Attachments[0].ID == uuid.Nil {
+		t.Fatal("attachment ID should not be nil")
 	}
 
 	raw, err := s.Files.Get("secret", got.Attachments[0].ID)
@@ -516,9 +521,9 @@ func TestSearchAttachmentName(t *testing.T) {
 		Data: []byte("pdf data"),
 	}
 	msg := message.NewMessage("bob", "here it is", att)
-	msg.ID = "search-att-msg"
+	msg.ID = uuid.MustParse("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
 	var err error
-	if err = message.StoreAttachments(s, "secret", msg.ID, msg.Attachments); err != nil {
+	if err = message.StoreAttachments(s, "secret", msg.ID.String(), msg.Attachments); err != nil {
 		t.Fatal("StoreAttachments:", err)
 	}
 	if _, err = message.Put(s, "secret", "alice", msg); err != nil {
@@ -546,8 +551,8 @@ func TestMessageDeleteRemovesFiles(t *testing.T) {
 		Data: []byte("image data"),
 	}
 	msg := message.NewMessage("bob", "pic", att)
-	msg.ID = "delete-files-msg"
-	if err := message.StoreAttachments(s, "secret", msg.ID, msg.Attachments); err != nil {
+	msg.ID = uuid.MustParse("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
+	if err := message.StoreAttachments(s, "secret", msg.ID.String(), msg.Attachments); err != nil {
 		t.Fatal("StoreAttachments:", err)
 	}
 	id, err := message.Put(s, "secret", "alice", msg)
@@ -564,7 +569,7 @@ func TestMessageDeleteRemovesFiles(t *testing.T) {
 		t.Fatal("expected non-empty file data")
 	}
 
-	if err = message.Delete(s, "secret", id); err != nil {
+	if err = message.Delete(s, "secret", uuid.MustParse(id)); err != nil {
 		t.Fatal("Delete:", err)
 	}
 
@@ -586,8 +591,8 @@ func TestMultipleAttachments(t *testing.T) {
 		Data: []byte("png data"),
 	}
 	msg := message.NewMessage("bob", "two files", att1, att2)
-	msg.ID = "multi-att-msg"
-	if err := message.StoreAttachments(s, "secret", msg.ID, msg.Attachments); err != nil {
+	msg.ID = uuid.MustParse("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
+	if err := message.StoreAttachments(s, "secret", msg.ID.String(), msg.Attachments); err != nil {
 		t.Fatal("StoreAttachments:", err)
 	}
 	var putErr error
@@ -609,10 +614,10 @@ func TestMultipleAttachments(t *testing.T) {
 		var raw []byte
 		raw, err = s.Files.Get("secret", a.ID)
 		if err != nil {
-			t.Fatalf("Files.Get(%q): %v", a.ID, err)
+			t.Fatalf("Files.Get(%q): %v", a.ID.String(), err)
 		}
 		if len(raw) == 0 {
-			t.Errorf("empty file data for %q", a.ID)
+			t.Errorf("empty file data for %q", a.ID.String())
 		}
 	}
 }
@@ -623,8 +628,8 @@ func TestStoreAttachmentsEmptyData(t *testing.T) {
 
 	att := message.Attachment{Name: "empty.bin"}
 	msg := message.NewMessage("bob", "empty att", att)
-	msg.ID = "empty-att-msg"
-	if err := message.StoreAttachments(s, "secret", msg.ID, msg.Attachments); err != nil {
+	msg.ID = uuid.MustParse("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
+	if err := message.StoreAttachments(s, "secret", msg.ID.String(), msg.Attachments); err != nil {
 		t.Fatal("StoreAttachments:", err)
 	}
 	if _, err := message.Put(s, "secret", "alice", msg); err != nil {
@@ -641,8 +646,8 @@ func TestStoreAttachmentsEmptyData(t *testing.T) {
 	if got.Attachments[0].Name != "empty.bin" {
 		t.Errorf("Name = %q", got.Attachments[0].Name)
 	}
-	if got.Attachments[0].ID != "" {
-		t.Errorf("expected empty ID for empty-data attachment, got %q", got.Attachments[0].ID)
+	if got.Attachments[0].ID != uuid.Nil {
+		t.Errorf("expected nil ID for empty-data attachment, got %v", got.Attachments[0].ID)
 	}
 }
 
@@ -657,7 +662,7 @@ func TestSpecialChars(t *testing.T) {
 		t.Fatal("Put:", err)
 	}
 
-	got, err := message.Get(s, "secret", id)
+	got, err := message.Get(s, "secret", uuid.MustParse(id))
 	if err != nil {
 		t.Fatal("Get:", err)
 	}

@@ -20,13 +20,14 @@ const (
 	DefaultRateLimit        = 100
 	DefaultRateWindow       = time.Minute
 	MaxMessageSize    int64 = 50 << 20
-	DefaultPingWindow       = 5 * time.Second
 
-	PubKeyLen       = 64
-	FileChunkSize   = 256 << 10
-	FileIDLen       = 36
-	NonceSize       = 12
-	MultipartMemBuf = 10 << 20
+	MaxProfilePicSize int64 = 2 << 20
+	DefaultPingWindow       = 5 * time.Second
+	PubKeyLen               = 64
+	FileChunkSize           = 256 << 10
+	FileIDLen               = 36
+	NonceSize               = 12
+	MultipartMemBuf         = 10 << 20
 )
 
 type Config struct {

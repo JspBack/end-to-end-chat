@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/JspBack/end-to-end-chat/store"
+	"github.com/google/uuid"
 )
 
 func TestOutboxPutAndGetPending(t *testing.T) {
@@ -73,7 +74,7 @@ func TestOutboxDelete(t *testing.T) {
 	s := store.New(dir)
 
 	id, _ := s.Outbox.Put("peer", []byte(`{"type":"message"}`), "secret")
-	err := s.Outbox.Delete(id)
+	err := s.Outbox.Delete(uuid.MustParse(id))
 	if err != nil {
 		t.Fatal("Delete:", err)
 	}
@@ -88,7 +89,7 @@ func TestOutboxDeleteNotFound(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "test_outbox_delnf")
 	s := store.New(dir)
 
-	err := s.Outbox.Delete("nonexistent-id")
+	err := s.Outbox.Delete(uuid.MustParse("00000000-0000-0000-0000-000000000001"))
 	if err != nil {
 		t.Errorf("delete non-existent should not error, got %v", err)
 	}
@@ -100,7 +101,7 @@ func TestOutboxIncrementRetry(t *testing.T) {
 
 	id, _ := s.Outbox.Put("peer", []byte(`{"type":"message"}`), "secret")
 
-	err := s.Outbox.IncrementRetry(id)
+	err := s.Outbox.IncrementRetry(uuid.MustParse(id))
 	if err != nil {
 		t.Fatal("IncrementRetry:", err)
 	}
@@ -113,7 +114,7 @@ func TestOutboxIncrementRetry(t *testing.T) {
 		t.Errorf("expected RetryCount=1, got %d", entries[0].RetryCount)
 	}
 
-	_ = s.Outbox.IncrementRetry(id)
+	_ = s.Outbox.IncrementRetry(uuid.MustParse(id))
 	entries, _ = s.Outbox.GetPending("peer", "secret")
 	if entries[0].RetryCount != 2 {
 		t.Errorf("expected RetryCount=2, got %d", entries[0].RetryCount)

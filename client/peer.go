@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 	"time"
@@ -71,11 +72,17 @@ func (c *Client) dialAndHandshake(ctx context.Context, addr string) (*Session, e
 	}
 	conn, resp, err := dialer.Dial(u.String(), nil)
 	if err != nil {
+		if resp != nil {
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusConflict {
+				return nil, errors.New("session already active for this peer")
+			}
+		}
 		return nil, fmt.Errorf("dial: %w", err)
 	}
 	resp.Body.Close()
 
-	sess := newSession(conn, c.Name, c.Keys, c.log, c.Timeout, c.RateLimit, c.RateWindow)
+	sess := newSession(conn, c.getName(), c.Keys, c.log, c.Timeout, c.RateLimit, c.RateWindow)
 	if err = sess.handshake(ctx, true); err != nil {
 		conn.Close()
 		return nil, fmt.Errorf("handshake: %w", err)
@@ -90,7 +97,28 @@ func (c *Client) dialAndHandshake(ctx context.Context, addr string) (*Session, e
 		return nil
 	})
 
-	c.storeSession(sess)
+	pubKey := sess.peerPubKey()
+	_, err = c.Store.KnownPeers.Get(pubKey)
+	isNew := err != nil
+
+	if isNew {
+		_ = c.Store.KnownPeers.Add(&store.KnownPeer{
+			PeerIP: addr,
+			PubKey: pubKey,
+			Name:   sess.peerName(),
+			Status: store.PeerStatusAccepted,
+		})
+	}
+
+	if err = c.storeSession(sess); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("store session: %w", err)
+	}
+
+	if isNew {
+		sess.setStatus(store.PeerStatusPending)
+		c.requestPeerInfo(sess)
+	}
 	return sess, nil
 }
 
@@ -123,29 +151,29 @@ func (c *Client) connectSession(ctx context.Context, addr string) error {
 		return err
 	}
 
-	_ = c.Store.KnownPeers.Add(&store.KnownPeer{
-		PeerIP: addr,
-		PubKey: sess.peerPubKey(),
-		Name:   sess.peerName(),
-		Status: store.PeerStatusAccepted,
-	})
-
 	go func() { _ = c.readLoop(ctx, sess) }()
 	return nil
 }
 
-func (c *Client) storeSession(sess *Session) {
+var errSessionExists = errors.New("session already active for peer")
+
+func (c *Client) storeSession(sess *Session) error {
 	pubKey := sess.peerPubKey()
-	sess.setStatus(store.PeerStatusAccepted)
-	if old, loaded := c.sessions.LoadAndDelete(pubKey); loaded {
-		if oldSess, ok := old.(*Session); ok {
-			_ = c.Store.KnownPeers.SetLastSeen(pubKey, time.Now().UTC().Format(time.RFC3339))
-			_ = oldSess.closeConn()
-		}
+
+	if _, loaded := c.sessions.Load(pubKey); loaded {
+		return errSessionExists
 	}
+
+	if peer, err := c.Store.KnownPeers.Get(pubKey); err == nil {
+		sess.setStatus(peer.Status)
+	} else {
+		sess.setStatus(store.PeerStatusPending)
+	}
+
 	c.sessions.Store(pubKey, sess)
 	_ = c.Store.KnownPeers.SetName(pubKey, sess.peerName())
 	c.flushOutbox(pubKey)
+	return nil
 }
 
 func (c *Client) peerWriteLoop(ctx context.Context, sess *Session, lines <-chan string) {

@@ -16,8 +16,8 @@ func StoreAttachments(s *store.Store, secret, msgID string, attachments []Attach
 			continue
 		}
 		id := attachments[i].ID
-		if id == "" {
-			id = uuid.New().String()
+		if id == uuid.Nil {
+			id = uuid.New()
 		}
 		if err := s.Files.PutWithID(secret, id, msgID, attachments[i].Data); err != nil {
 			return fmt.Errorf("message: store attachment: %w", err)
@@ -41,7 +41,11 @@ func Search(s *store.Store, secret, query string, limit int) ([]Message, error) 
 
 	var out []Message
 	for _, id := range ids {
-		msg, getErr := Get(s, secret, id)
+		msgID, parseErr := uuid.Parse(id)
+		if parseErr != nil {
+			continue
+		}
+		msg, getErr := Get(s, secret, msgID)
 		if getErr != nil {
 			continue
 		}
@@ -51,15 +55,15 @@ func Search(s *store.Store, secret, query string, limit int) ([]Message, error) 
 }
 
 type Attachment struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	MIMEType string `json:"mime_type"`
-	Size     int64  `json:"size"`
-	Data     []byte `json:"data,omitempty"`
+	ID       uuid.UUID `json:"id"`
+	Name     string    `json:"name"`
+	MIMEType string    `json:"mime_type"`
+	Size     int64     `json:"size"`
+	Data     []byte    `json:"data,omitempty"`
 }
 
 type Message struct {
-	ID          string       `json:"id,omitempty"`
+	ID          uuid.UUID    `json:"id"`
 	FromPubKey  string       `json:"from_pub_key,omitempty"`
 	To          string       `json:"to"`
 	Content     string       `json:"content"`
@@ -68,7 +72,7 @@ type Message struct {
 }
 
 func NewMessage(to, content string, attachments ...Attachment) *Message {
-	return &Message{To: to, Content: content, Time: time.Now().UTC().Format(time.RFC3339), Attachments: attachments}
+	return &Message{ID: uuid.New(), To: to, Content: content, Time: time.Now().UTC().Format(time.RFC3339), Attachments: attachments}
 }
 
 func (m *Message) Encode() ([]byte, error) {
@@ -104,26 +108,27 @@ func Put(s *store.Store, secret, fromName string, msg *Message) (string, error) 
 	if err != nil {
 		return "", fmt.Errorf("message: marshal: %w", err)
 	}
-	var id string
-	if msg.ID != "" {
-		id = msg.ID
-		if err = s.Chats.PutWithID(id, string(plain), secret); err != nil {
+	var idStr string
+	if msg.ID != uuid.Nil {
+		idStr = msg.ID.String()
+		if err = s.Chats.PutWithID(msg.ID, string(plain), secret); err != nil {
 			return "", fmt.Errorf("message: store put: %w", err)
 		}
 	} else {
-		id, err = s.Chats.Put(string(plain), secret)
+		idStr, err = s.Chats.Put(string(plain), secret)
 		if err != nil {
 			return "", fmt.Errorf("message: store put: %w", err)
 		}
-		msg.ID = id
+		msg.ID = uuid.MustParse(idStr)
 	}
-	_ = s.Chats.IndexSearch(id, fromName, msg.To, searchText(msg))
-	s.Chats.CacheStore(id, string(plain))
-	return id, nil
+	_ = s.Chats.IndexSearch(idStr, fromName, msg.To, searchText(msg))
+	s.Chats.CacheStore(idStr, string(plain))
+	return idStr, nil
 }
 
-func Get(s *store.Store, secret, id string) (*Message, error) {
-	if cached, ok := s.Chats.CacheLoad(id); ok {
+func Get(s *store.Store, secret string, id uuid.UUID) (*Message, error) {
+	idStr := id.String()
+	if cached, ok := s.Chats.CacheLoad(idStr); ok {
 		var msg Message
 		if err := json.Unmarshal([]byte(cached), &msg); err != nil {
 			return nil, fmt.Errorf("message: unmarshal: %w", err)
@@ -140,11 +145,11 @@ func Get(s *store.Store, secret, id string) (*Message, error) {
 		return nil, fmt.Errorf("message: unmarshal: %w", err)
 	}
 	msg.ID = id
-	s.Chats.CacheStore(id, plain)
+	s.Chats.CacheStore(idStr, plain)
 	return &msg, nil
 }
 
-func Update(s *store.Store, secret, id, fromName string, msg *Message) error {
+func Update(s *store.Store, secret string, id uuid.UUID, fromName string, msg *Message) error {
 	plain, err := json.Marshal(msg)
 	if err != nil {
 		return fmt.Errorf("message: marshal: %w", err)
@@ -152,13 +157,15 @@ func Update(s *store.Store, secret, id, fromName string, msg *Message) error {
 	if err = s.Chats.Update(id, string(plain), secret); err != nil {
 		return fmt.Errorf("message: store update: %w", err)
 	}
-	_ = s.Chats.IndexSearch(id, fromName, msg.To, searchText(msg))
-	s.Chats.CacheStore(id, string(plain))
+	idStr := id.String()
+	_ = s.Chats.IndexSearch(idStr, fromName, msg.To, searchText(msg))
+	s.Chats.CacheStore(idStr, string(plain))
 	return nil
 }
 
-func Delete(s *store.Store, secret, id string) error {
-	if cached, ok := s.Chats.CacheLoad(id); ok {
+func Delete(s *store.Store, secret string, id uuid.UUID) error {
+	idStr := id.String()
+	if cached, ok := s.Chats.CacheLoad(idStr); ok {
 		var msg Message
 		if err := json.Unmarshal([]byte(cached), &msg); err == nil {
 			for _, a := range msg.Attachments {

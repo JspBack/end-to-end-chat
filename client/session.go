@@ -20,6 +20,7 @@ import (
 	"github.com/JspBack/end-to-end-chat/config"
 	"github.com/JspBack/end-to-end-chat/keys"
 	"github.com/JspBack/end-to-end-chat/signal"
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
 
@@ -72,7 +73,7 @@ func (s *Session) doSend(ourEphemeralHex string, sig []byte) error {
 		Signature:    base64.StdEncoding.EncodeToString(sig),
 	}
 	inner, _ := json.Marshal(data)
-	payload := signal.New(signal.TypeKeyExchange, s.ourStaticPubKey, "", inner)
+	payload := signal.New(signal.TypeKeyExchange, s.ourStaticPubKey, uuid.Nil, inner)
 	_ = s.conn.SetWriteDeadline(time.Now().Add(s.timeout))
 	if err := s.conn.WriteMessage(websocket.TextMessage, payload); err != nil {
 		return fmt.Errorf("session: write: %w", err)

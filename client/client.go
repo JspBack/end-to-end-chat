@@ -21,6 +21,7 @@ import (
 	"github.com/JspBack/end-to-end-chat/signal"
 	"github.com/JspBack/end-to-end-chat/store"
 	"github.com/go-chi/httprate"
+	"github.com/google/uuid"
 )
 
 type fileMeta struct {
@@ -35,8 +36,12 @@ type pendingFile struct {
 	buf      bytes.Buffer
 }
 
+type Info struct {
+	Name       string    `json:"name"`
+	ProfilePic uuid.UUID `json:"profile_pic"`
+}
+
 type Client struct {
-	Name           string
 	Keys           *keys.Keys
 	Store          *store.Store
 	listenPort     int
@@ -57,7 +62,12 @@ type Client struct {
 	writeMode bool
 
 	pendingMu    sync.Mutex
-	pendingFiles map[string]*pendingFile
+	pendingFiles map[uuid.UUID]*pendingFile
+}
+
+type infoResponseData struct {
+	Name       string `json:"name"`
+	ProfilePic []byte `json:"profile_pic,omitempty"`
 }
 
 func loadTLSConfig(cfg config.Config, logger *slog.Logger) *tls.Config {
@@ -74,8 +84,7 @@ func loadTLSConfig(cfg config.Config, logger *slog.Logger) *tls.Config {
 
 func New(cfg config.Config, logger *slog.Logger) *Client {
 	k := keys.AutoLoad()
-	return &Client{
-		Name:           cfg.ClientName,
+	c := &Client{
 		Keys:           k,
 		Store:          store.New(k.Derive()),
 		listenPort:     cfg.Port,
@@ -90,8 +99,29 @@ func New(cfg config.Config, logger *slog.Logger) *Client {
 		keyFileTLS:     cfg.KeyFileTLS,
 		peerAddr:       cfg.PeerAddr,
 		writeMode:      cfg.WriteMode,
-		pendingFiles:   make(map[string]*pendingFile),
+		pendingFiles:   make(map[uuid.UUID]*pendingFile),
 	}
+	if cfg.ClientName != "" {
+		_ = c.Store.Profile.SetName(cfg.ClientName)
+	}
+	return c
+}
+
+func (c *Client) Info() Info {
+	prof, err := c.Store.Profile.Get()
+	if err != nil {
+		return Info{}
+	}
+	picID, _ := uuid.Parse(prof.ProfilePic)
+	return Info{Name: prof.Name, ProfilePic: picID}
+}
+
+func (c *Client) setName(s string) {
+	_ = c.Store.Profile.SetName(s)
+}
+
+func (c *Client) getName() string {
+	return c.Info().Name
 }
 
 func (c *Client) UseTLS() bool {
@@ -115,7 +145,7 @@ func (c *Client) Shutdown() {
 
 func (c *Client) sendMessage(sess *Session, msg *message.Message) error {
 	msg.FromPubKey = c.Keys.Public
-	if _, err := message.Put(c.Store, c.Keys.Private, c.Name, msg); err != nil {
+	if _, err := message.Put(c.Store, c.Keys.Private, c.getName(), msg); err != nil {
 		c.log.Warn("store message failed", "error", err)
 	}
 
@@ -123,13 +153,13 @@ func (c *Client) sendMessage(sess *Session, msg *message.Message) error {
 	if err != nil {
 		return fmt.Errorf("encode message: %w", err)
 	}
-	return sess.send(signal.New(signal.TypeMessage, c.Keys.Public, "", payload))
+	return sess.send(signal.New(signal.TypeMessage, c.Keys.Public, uuid.Nil, payload))
 }
 
-func (c *Client) sendFile(sess *Session, id, name, mimeType string, size int64, data io.Reader) error {
+func (c *Client) sendFile(sess *Session, id uuid.UUID, name, mimeType string, size int64, data io.Reader) error {
 	meta := fileMeta{Name: name, Size: size, MIME: mimeType}
 	metaRaw, _ := json.Marshal(meta)
-	c.log.Debug("send file start", "id", id, "name", name, "size", size)
+	c.log.Debug("send file start", "id", id.String(), "name", name, "size", size)
 	if err := sess.send(signal.New(signal.TypeFileMeta, c.Keys.Public, id, metaRaw)); err != nil {
 		return fmt.Errorf("send file meta: %w", err)
 	}
@@ -138,8 +168,9 @@ func (c *Client) sendFile(sess *Session, id, name, mimeType string, size int64, 
 	for {
 		n, err := data.Read(buf)
 		if n > 0 {
+			idStr := id.String()
 			plain := make([]byte, config.FileIDLen+n)
-			copy(plain, []byte(id))
+			copy(plain, []byte(idStr))
 			copy(plain[config.FileIDLen:], buf[:n])
 			if sendErr := sess.send(plain); sendErr != nil {
 				if qerr := c.queueSignal(sess.peerPubKey(), plain); qerr != nil {
@@ -171,14 +202,14 @@ func (c *Client) queueSignal(targetPubKey string, sig []byte) error {
 
 func (c *Client) sendMessageToPeer(targetPubKey string, msg *message.Message) error {
 	msg.FromPubKey = c.Keys.Public
-	if _, err := message.Put(c.Store, c.Keys.Private, c.Name, msg); err != nil {
+	if _, err := message.Put(c.Store, c.Keys.Private, c.getName(), msg); err != nil {
 		c.log.Warn("store message failed", "error", err)
 	}
 	payload, err := json.Marshal(msg)
 	if err != nil {
 		return fmt.Errorf("encode message: %w", err)
 	}
-	sig := signal.New(signal.TypeMessage, c.Keys.Public, "", payload)
+	sig := signal.New(signal.TypeMessage, c.Keys.Public, uuid.Nil, payload)
 
 	v, ok := c.sessions.Load(targetPubKey)
 	if !ok {
@@ -210,11 +241,16 @@ func (c *Client) flushOutbox(pubKey string) {
 	}
 
 	for _, entry := range entries {
+		entryID, parseErr := uuid.Parse(entry.ID)
+		if parseErr != nil {
+			c.log.Warn("flush outbox: invalid entry id", "entry_id", entry.ID, "error", parseErr)
+			continue
+		}
 		if sendErr := sess.send(entry.SignalContent); sendErr != nil {
-			_ = c.Store.Outbox.IncrementRetry(entry.ID)
+			_ = c.Store.Outbox.IncrementRetry(entryID)
 			return
 		}
-		if delErr := c.Store.Outbox.Delete(entry.ID); delErr != nil {
+		if delErr := c.Store.Outbox.Delete(entryID); delErr != nil {
 			c.log.Warn("flush outbox: delete delivered entry", "entry_id", entry.ID, "error", delErr)
 		}
 	}
@@ -234,7 +270,7 @@ func (c *Client) sendToAll(content string) {
 	})
 }
 
-func (c *Client) broadcastDelete(id string) {
+func (c *Client) broadcastDelete(id uuid.UUID) {
 	payload := signal.New(signal.TypeDelete, c.Keys.Public, id, nil)
 	c.sessions.Range(func(_, value interface{}) bool {
 		if sess, ok := value.(*Session); ok {
@@ -259,11 +295,11 @@ func (c *Client) handleSignal(sig *signal.Signal, pubKey string) {
 			return
 		}
 		msg.FromPubKey = pubKey
-		fromName := c.peerNameForPubKey(pubKey)
+		fromName := c.displayNameForPubKey(pubKey)
 		if _, putErr := message.Put(c.Store, c.Keys.Private, fromName, msg); putErr != nil {
 			c.log.Warn("store message failed", "error", putErr)
 		}
-		if msg.To == c.Name {
+		if msg.To == c.getName() {
 			c.log.Debug("message received",
 				"from", fromName, "to", msg.To)
 		}
@@ -281,7 +317,7 @@ func (c *Client) handleSignal(sig *signal.Signal, pubKey string) {
 		c.pendingMu.Lock()
 		c.pendingFiles[sig.ID] = &pendingFile{meta: meta}
 		c.pendingMu.Unlock()
-		c.log.Debug("recv file meta", "id", sig.ID, "name", meta.Name, "size", meta.Size)
+		c.log.Debug("recv file meta", "id", sig.ID.String(), "name", meta.Name, "size", meta.Size)
 
 	case signal.TypeDelete:
 		if sig.From != pubKey {
@@ -300,7 +336,114 @@ func (c *Client) handleSignal(sig *signal.Signal, pubKey string) {
 		if updErr := c.verifyAndUpdate(sig, pubKey); updErr != nil {
 			c.log.Warn("update message failed", "error", updErr)
 		}
+
+	case signal.TypeInfoRequest:
+		c.handleInfoRequest(pubKey)
+
+	case signal.TypeInfoResponse:
+		c.handleInfoResponse(pubKey, sig.Content)
+
+	case signal.TypeInfoChanged:
+		c.handleInfoChanged(pubKey)
+
+	case signal.TypePeerAccepted:
+		c.handlePeerAccepted(pubKey)
 	}
+}
+
+func (c *Client) handleInfoRequest(pubKey string) {
+	info := c.Info()
+	resp := infoResponseData{Name: info.Name}
+	if info.ProfilePic != uuid.Nil {
+		data, err := c.Store.Files.Get(c.Keys.Private, info.ProfilePic)
+		if err == nil {
+			resp.ProfilePic = data
+		}
+	}
+	payload, _ := json.Marshal(resp)
+	sig := signal.New(signal.TypeInfoResponse, c.Keys.Public, uuid.Nil, payload)
+	v, ok := c.sessions.Load(pubKey)
+	if !ok {
+		return
+	}
+	sess, ok := v.(*Session)
+	if !ok {
+		return
+	}
+	_ = sess.send(sig)
+}
+
+func (c *Client) handleInfoResponse(pubKey string, content []byte) {
+	var resp infoResponseData
+	if err := json.Unmarshal(content, &resp); err != nil {
+		c.log.Warn("decode info response", "error", err)
+		return
+	}
+	if resp.Name != "" {
+		_ = c.Store.KnownPeers.SetName(pubKey, resp.Name)
+	}
+	var newID uuid.UUID
+	if len(resp.ProfilePic) > 0 {
+		newID = uuid.New()
+		if err := c.Store.Files.PutWithID(c.Keys.Private, newID, "", resp.ProfilePic); err != nil {
+			c.log.Warn("store profile pic", "error", err)
+			return
+		}
+	}
+	peer, err := c.Store.KnownPeers.Get(pubKey)
+	if err == nil {
+		oldPicID, oldErr := uuid.Parse(peer.ProfilePic)
+		if oldErr == nil && oldPicID != newID {
+			_ = c.Store.Files.Delete(oldPicID)
+		}
+	}
+	_ = c.Store.KnownPeers.SetProfilePic(pubKey, newID)
+}
+
+func (c *Client) handleInfoChanged(pubKey string) {
+	v, ok := c.sessions.Load(pubKey)
+	if !ok {
+		return
+	}
+	sess, ok := v.(*Session)
+	if !ok {
+		return
+	}
+	c.requestPeerInfo(sess)
+}
+
+func (c *Client) handlePeerAccepted(pubKey string) {
+	peer, err := c.Store.KnownPeers.Get(pubKey)
+	if err != nil {
+		return
+	}
+	peer.Status = store.PeerStatusAccepted
+	_ = c.Store.KnownPeers.Add(peer)
+
+	if v, loaded := c.sessions.Load(pubKey); loaded {
+		if sess, ok := v.(*Session); ok {
+			sess.setStatus(store.PeerStatusAccepted)
+		}
+	}
+
+	c.log.Debug("peer accepted our connection", "pub_key", pubKey)
+}
+
+func (c *Client) requestPeerInfo(sess *Session) {
+	sig := signal.New(signal.TypeInfoRequest, c.Keys.Public, uuid.Nil, nil)
+	_ = sess.send(sig)
+}
+
+func (c *Client) broadcastInfoChanged() {
+	payload := signal.New(signal.TypeInfoChanged, c.Keys.Public, uuid.Nil, nil)
+	c.sessions.Range(func(_, value interface{}) bool {
+		if sess, ok := value.(*Session); ok {
+			if err := sess.send(payload); err != nil {
+				_ = c.queueSignal(sess.peerPubKey(), payload)
+			}
+		}
+		return true
+	})
 }
 
 func (c *Client) handleFileChunk(plain []byte) {
@@ -308,7 +451,11 @@ func (c *Client) handleFileChunk(plain []byte) {
 		c.log.Warn("file chunk too short")
 		return
 	}
-	id := string(plain[:config.FileIDLen])
+	id, err := uuid.Parse(string(plain[:config.FileIDLen]))
+	if err != nil {
+		c.log.Warn("file chunk invalid id", "error", err)
+		return
+	}
 	data := plain[config.FileIDLen:]
 
 	c.pendingMu.Lock()
@@ -316,7 +463,7 @@ func (c *Client) handleFileChunk(plain []byte) {
 	c.pendingMu.Unlock()
 
 	if !ok {
-		c.log.Warn("file chunk for unknown transfer", "id", id)
+		c.log.Warn("file chunk for unknown transfer", "id", id.String())
 		return
 	}
 
@@ -329,7 +476,7 @@ func (c *Client) handleFileChunk(plain []byte) {
 	}
 }
 
-func (c *Client) finalizeFile(id string, pf *pendingFile) {
+func (c *Client) finalizeFile(id uuid.UUID, pf *pendingFile) {
 	defer func() {
 		c.pendingMu.Lock()
 		delete(c.pendingFiles, id)
@@ -347,25 +494,31 @@ func (c *Client) finalizeFile(id string, pf *pendingFile) {
 		c.log.Warn("store file", "error", err)
 		return
 	}
-	c.log.Debug("recv file done", "id", id, "name", pf.meta.Name, "size", pf.meta.Size)
+	c.log.Debug("recv file done", "id", id.String(), "name", pf.meta.Name, "size", pf.meta.Size)
 }
 
 func (c *Client) handleDecrypted(plain []byte, sess *Session, pubKey string) {
-	if sess.status() != store.PeerStatusAccepted {
-		return
-	}
 	if len(plain) == 0 {
 		return
 	}
 	if plain[0] == '{' {
-		c.log.Debug("recv signal", "len", len(plain))
-		if !sess.msgLimiter.Allow() {
-			c.log.Warn("rate limit exceeded, dropping message")
-			return
-		}
 		sig, err := signal.Parse(plain)
 		if err != nil {
 			c.log.Warn("decode envelope failed", "error", err)
+			return
+		}
+
+		if sess.status() != store.PeerStatusAccepted {
+			switch sig.Type {
+			case signal.TypeInfoRequest, signal.TypeInfoResponse, signal.TypeInfoChanged, signal.TypePeerAccepted:
+				c.handleSignal(sig, pubKey)
+			}
+			return
+		}
+
+		c.log.Debug("recv signal", "len", len(plain))
+		if !sess.msgLimiter.Allow() {
+			c.log.Warn("rate limit exceeded, dropping message")
 			return
 		}
 		c.handleSignal(sig, pubKey)
@@ -375,23 +528,20 @@ func (c *Client) handleDecrypted(plain []byte, sess *Session, pubKey string) {
 	}
 }
 
-func (c *Client) peerNameForPubKey(pubKey string) string {
-	if v, ok := c.sessions.Load(pubKey); ok {
-		if sess, sessOk := v.(*Session); sessOk {
-			if n := sess.peerName(); n != "" {
-				return n
-			}
-		}
-	}
+func (c *Client) displayNameForPubKey(pubKey string) string {
 	if peer, err := c.Store.KnownPeers.Get(pubKey); err == nil {
-		if peer.Name != "" {
-			return peer.Name
+		n := peer.Nickname
+		if n == "" {
+			n = peer.Name
+		}
+		if n != "" {
+			return n
 		}
 	}
 	return pubKey[:16]
 }
 
-func (c *Client) verifyAuthor(id, pubKey string) (*message.Message, error) {
+func (c *Client) verifyAuthor(id uuid.UUID, pubKey string) (*message.Message, error) {
 	msg, err := message.Get(c.Store, c.Keys.Private, id)
 	if err != nil {
 		return nil, fmt.Errorf("get message: %w", err)
@@ -418,13 +568,13 @@ func (c *Client) verifyAndUpdate(sig *signal.Signal, pubKey string) error {
 		return err
 	}
 	msg.Content = string(sig.Content)
-	if err = message.Update(c.Store, c.Keys.Private, sig.ID, c.Name, msg); err != nil {
+	if err = message.Update(c.Store, c.Keys.Private, sig.ID, c.getName(), msg); err != nil {
 		return fmt.Errorf("verify update: %w", err)
 	}
 	return nil
 }
 
-func (c *Client) broadcastUpdate(id, content string) {
+func (c *Client) broadcastUpdate(id uuid.UUID, content string) {
 	payload := signal.New(signal.TypeUpdate, c.Keys.Public, id, []byte(content))
 	c.sessions.Range(func(_, value interface{}) bool {
 		if sess, ok := value.(*Session); ok {
@@ -466,7 +616,7 @@ func (c *Client) Listen() {
 		WriteTimeout:      c.Timeout,
 		IdleTimeout:       c.Timeout,
 	}
-	c.log.Info("listening", "addr", addr, "client", c.Name, "tls", c.UseTLS())
+	c.log.Info("listening", "addr", addr, "client", c.getName(), "tls", c.UseTLS())
 	var serveErr error
 	if c.UseTLS() {
 		serveErr = c.srv.ListenAndServeTLS(c.certFile, c.keyFileTLS)

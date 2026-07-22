@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/JspBack/end-to-end-chat/store"
+	"github.com/google/uuid"
 )
 
 func TestStorePutGet(t *testing.T) {
@@ -21,7 +22,8 @@ func TestStorePutGet(t *testing.T) {
 		t.Fatal("expected non-empty id")
 	}
 
-	val, err := s.Chats.Get(id, "secret")
+	msgID, _ := uuid.Parse(id)
+	val, err := s.Chats.Get(msgID, "secret")
 	if err != nil {
 		t.Fatal("Get:", err)
 	}
@@ -39,7 +41,7 @@ func TestStoreGetWrongSecret(t *testing.T) {
 		t.Fatal("Put:", err)
 	}
 
-	_, err = s.Chats.Get(id, "wrong")
+	_, err = s.Chats.Get(uuid.MustParse(id), "wrong")
 	if err == nil {
 		t.Error("expected error for wrong secret")
 	}
@@ -49,7 +51,7 @@ func TestStoreGetNotFound(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "test_notfound")
 	s := store.New(dir)
 
-	_, err := s.Chats.Get("nonexistent-id", "secret")
+	_, err := s.Chats.Get(uuid.MustParse("00000000-0000-0000-0000-000000000001"), "secret")
 	if !os.IsNotExist(err) {
 		t.Errorf("expected ErrNotExist, got %v", err)
 	}
@@ -64,12 +66,12 @@ func TestStoreUpdate(t *testing.T) {
 		t.Fatal("Put:", err)
 	}
 
-	err = s.Chats.Update(id, "new value", "secret")
+	err = s.Chats.Update(uuid.MustParse(id), "new value", "secret")
 	if err != nil {
 		t.Fatal("Update:", err)
 	}
 
-	val, err := s.Chats.Get(id, "secret")
+	val, err := s.Chats.Get(uuid.MustParse(id), "secret")
 	if err != nil {
 		t.Fatal("Get after update:", err)
 	}
@@ -82,7 +84,7 @@ func TestStoreUpdateNotFound(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "test_updatenf")
 	s := store.New(dir)
 
-	err := s.Chats.Update("nonexistent", "value", "secret")
+	err := s.Chats.Update(uuid.MustParse("00000000-0000-0000-0000-000000000001"), "value", "secret")
 	if !os.IsNotExist(err) {
 		t.Errorf("expected ErrNotExist, got %v", err)
 	}
@@ -122,12 +124,12 @@ func TestStoreDelete(t *testing.T) {
 	s := store.New(dir)
 
 	id, _ := s.Chats.Put("to delete", "secret")
-	err := s.Chats.Delete(id)
+	err := s.Chats.Delete(uuid.MustParse(id))
 	if err != nil {
 		t.Fatal("Delete:", err)
 	}
 
-	_, err = s.Chats.Get(id, "secret")
+	_, err = s.Chats.Get(uuid.MustParse(id), "secret")
 	if !os.IsNotExist(err) {
 		t.Errorf("expected ErrNotExist after delete, got %v", err)
 	}
@@ -137,12 +139,13 @@ func TestStorePutWithID(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "test_putwithid")
 	s := store.New(dir)
 
-	err := s.Chats.PutWithID("custom-id", "custom value", "secret")
+	customUUID := uuid.MustParse("00000000-0000-0000-0000-000000000002")
+	err := s.Chats.PutWithID(customUUID, "custom value", "secret")
 	if err != nil {
 		t.Fatal("PutWithID:", err)
 	}
 
-	val, err := s.Chats.Get("custom-id", "secret")
+	val, err := s.Chats.Get(customUUID, "secret")
 	if err != nil {
 		t.Fatal("Get:", err)
 	}
@@ -155,10 +158,11 @@ func TestStoreReplaceWithPutWithID(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "test_replace")
 	s := store.New(dir)
 
-	s.Chats.PutWithID("same-id", "first", "secret")
-	s.Chats.PutWithID("same-id", "second", "secret")
+	sameUUID := uuid.MustParse("00000000-0000-0000-0000-000000000003")
+	s.Chats.PutWithID(sameUUID, "first", "secret")
+	s.Chats.PutWithID(sameUUID, "second", "secret")
 
-	val, err := s.Chats.Get("same-id", "secret")
+	val, err := s.Chats.Get(sameUUID, "secret")
 	if err != nil {
 		t.Fatal("Get:", err)
 	}
@@ -184,7 +188,7 @@ func TestStoreDeleteNotFound(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "test_delnotfound")
 	s := store.New(dir)
 
-	err := s.Chats.Delete("nonexistent")
+	err := s.Chats.Delete(uuid.MustParse("00000000-0000-0000-0000-000000000001"))
 	if err != nil {
 		t.Errorf("delete non-existent should not error, got %v", err)
 	}
@@ -216,7 +220,7 @@ func TestStoreEncryptDifferentKeys(t *testing.T) {
 		t.Fatal("Put with key1:", err)
 	}
 
-	val, err := s.Chats.Get(id, "key1")
+	val, err := s.Chats.Get(uuid.MustParse(id), "key1")
 	if err != nil {
 		t.Fatal("Get with key1:", err)
 	}
@@ -224,7 +228,7 @@ func TestStoreEncryptDifferentKeys(t *testing.T) {
 		t.Errorf("got %q, want %q", val, "secret data")
 	}
 
-	_, err = s.Chats.Get(id, "key2")
+	_, err = s.Chats.Get(uuid.MustParse(id), "key2")
 	if err == nil {
 		t.Error("expected error with wrong key")
 	}
@@ -241,7 +245,7 @@ func TestStoreLongValue(t *testing.T) {
 		t.Fatal("Put long value:", err)
 	}
 
-	got, err := s.Chats.Get(id, "secret")
+	got, err := s.Chats.Get(uuid.MustParse(id), "secret")
 	if err != nil {
 		t.Fatal("Get:", err)
 	}
@@ -261,8 +265,8 @@ func TestStoreRepeatedPutSameContent(t *testing.T) {
 		t.Error("two Puts should produce different IDs")
 	}
 
-	v1, _ := s.Chats.Get(id1, "secret")
-	v2, _ := s.Chats.Get(id2, "secret")
+	v1, _ := s.Chats.Get(uuid.MustParse(id1), "secret")
+	v2, _ := s.Chats.Get(uuid.MustParse(id2), "secret")
 	if v1 != v2 {
 		t.Errorf("values differ: %q vs %q", v1, v2)
 	}
@@ -322,8 +326,9 @@ func TestStoreIndexDelete(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "test_idx_del")
 	s := store.New(dir)
 
-	s.Chats.IndexSearch("msg-del", "alice", "bob", "delete me")
-	s.Chats.Delete("msg-del")
+	delID := uuid.MustParse("00000000-0000-0000-0000-000000000005")
+	s.Chats.IndexSearch(delID.String(), "alice", "bob", "delete me")
+	s.Chats.Delete(delID)
 
 	ids, err := s.Chats.Search("delete", 10)
 	if err != nil {

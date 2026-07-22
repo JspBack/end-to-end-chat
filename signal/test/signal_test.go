@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/JspBack/end-to-end-chat/signal"
+	"github.com/google/uuid"
 )
 
 func TestSignalDeleteType(t *testing.T) {
@@ -17,7 +18,7 @@ func TestSignalDeleteType(t *testing.T) {
 }
 
 func TestNewDeleteSignal(t *testing.T) {
-	data := signal.New(signal.TypeDelete, "alice", "msg-123", nil)
+	data := signal.New(signal.TypeDelete, "alice", uuid.Nil, nil)
 	var s struct {
 		Type string `json:"type"`
 		From string `json:"from"`
@@ -32,13 +33,14 @@ func TestNewDeleteSignal(t *testing.T) {
 	if s.From != "alice" {
 		t.Errorf("From = %q, want %q", s.From, "alice")
 	}
-	if s.ID != "msg-123" {
-		t.Errorf("ID = %q, want %q", s.ID, "msg-123")
+	if s.ID != "00000000-0000-0000-0000-000000000000" {
+		t.Errorf("ID = %q, want %q", s.ID, "00000000-0000-0000-0000-000000000000")
 	}
 }
 
 func TestNewUpdateSignal(t *testing.T) {
-	data := signal.New(signal.TypeUpdate, "alice", "msg-456", []byte("new content"))
+	id := uuid.MustParse("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
+	data := signal.New(signal.TypeUpdate, "alice", id, []byte("new content"))
 	parsed, err := signal.Parse(data)
 	if err != nil {
 		t.Fatal("Parse:", err)
@@ -49,8 +51,8 @@ func TestNewUpdateSignal(t *testing.T) {
 	if parsed.From != "alice" {
 		t.Errorf("From = %q, want %q", parsed.From, "alice")
 	}
-	if parsed.ID != "msg-456" {
-		t.Errorf("ID = %q, want %q", parsed.ID, "msg-456")
+	if parsed.ID != id {
+		t.Errorf("ID = %v, want %v", parsed.ID, id)
 	}
 	if string(parsed.Content) != "new content" {
 		t.Errorf("Content = %q, want %q", string(parsed.Content), "new content")
@@ -88,8 +90,9 @@ func TestTypeFileMetaConstant(t *testing.T) {
 }
 
 func TestNewFileMetaSignal(t *testing.T) {
+	id := uuid.MustParse("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
 	meta := `{"name":"photo.jpg","size":12345,"mime":"image/jpeg"}`
-	data := signal.New(signal.TypeFileMeta, "alice", "file-uuid-1", []byte(meta))
+	data := signal.New(signal.TypeFileMeta, "alice", id, []byte(meta))
 	parsed, err := signal.Parse(data)
 	if err != nil {
 		t.Fatal("Parse:", err)
@@ -100,8 +103,8 @@ func TestNewFileMetaSignal(t *testing.T) {
 	if parsed.From != "alice" {
 		t.Errorf("From = %q, want %q", parsed.From, "alice")
 	}
-	if parsed.ID != "file-uuid-1" {
-		t.Errorf("ID = %q, want %q", parsed.ID, "file-uuid-1")
+	if parsed.ID != id {
+		t.Errorf("ID = %v, want %v", parsed.ID, id)
 	}
 	if string(parsed.Content) != meta {
 		t.Errorf("Content = %q, want %q", string(parsed.Content), meta)
@@ -109,8 +112,9 @@ func TestNewFileMetaSignal(t *testing.T) {
 }
 
 func TestTypeFileMetaNewRoundTrip(t *testing.T) {
+	id := uuid.MustParse("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
 	meta := `{"name":"doc.pdf","size":999,"mime":"application/pdf"}`
-	data := signal.New(signal.TypeFileMeta, "bob", "abc-123", []byte(meta))
+	data := signal.New(signal.TypeFileMeta, "bob", id, []byte(meta))
 	parsed, err := signal.Parse(data)
 	if err != nil {
 		t.Fatal("Parse:", err)
@@ -121,8 +125,8 @@ func TestTypeFileMetaNewRoundTrip(t *testing.T) {
 	if parsed.From != "bob" {
 		t.Errorf("From = %q, want %q", parsed.From, "bob")
 	}
-	if parsed.ID != "abc-123" {
-		t.Errorf("ID = %q, want %q", parsed.ID, "abc-123")
+	if parsed.ID != id {
+		t.Errorf("ID = %v, want %v", parsed.ID, id)
 	}
 	if string(parsed.Content) != meta {
 		t.Errorf("Content = %q, want %q", string(parsed.Content), meta)

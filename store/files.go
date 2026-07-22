@@ -7,29 +7,31 @@ import (
 	"fmt"
 	"os"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 type FileStore struct {
 	db *sql.DB
 }
 
-func (f *FileStore) PutWithID(secret, id, msgID string, data []byte) error {
+func (f *FileStore) PutWithID(secret string, id uuid.UUID, msgID string, data []byte) error {
 	encrypted, err := encryptRaw(secret, data)
 	if err != nil {
 		return fmt.Errorf("store: encrypt file: %w", err)
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	q := "INSERT OR REPLACE INTO files (id, data, msg_id, created_at) VALUES (?, ?, ?, ?)"
-	if _, err = f.db.ExecContext(context.Background(), q, id, encrypted, msgID, now); err != nil {
+	if _, err = f.db.ExecContext(context.Background(), q, id.String(), encrypted, msgID, now); err != nil {
 		return fmt.Errorf("store: file put: %w", err)
 	}
 	return nil
 }
 
-func (f *FileStore) Get(secret, id string) ([]byte, error) {
+func (f *FileStore) Get(secret string, id uuid.UUID) ([]byte, error) {
 	var encrypted []byte
 	q := "SELECT data FROM files WHERE id = ?"
-	if err := f.db.QueryRowContext(context.Background(), q, id).Scan(&encrypted); err != nil {
+	if err := f.db.QueryRowContext(context.Background(), q, id.String()).Scan(&encrypted); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, os.ErrNotExist
 		}
@@ -42,9 +44,9 @@ func (f *FileStore) Get(secret, id string) ([]byte, error) {
 	return plain, nil
 }
 
-func (f *FileStore) Delete(id string) error {
+func (f *FileStore) Delete(id uuid.UUID) error {
 	q := "DELETE FROM files WHERE id = ?"
-	if _, err := f.db.ExecContext(context.Background(), q, id); err != nil {
+	if _, err := f.db.ExecContext(context.Background(), q, id.String()); err != nil {
 		return fmt.Errorf("store: file delete: %w", err)
 	}
 	return nil

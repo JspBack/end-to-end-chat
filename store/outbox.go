@@ -101,17 +101,17 @@ func (o *OutboxStore) GetAllPending() ([]OutboxEntry, error) {
 	return out, nil
 }
 
-func (o *OutboxStore) Delete(id string) error {
+func (o *OutboxStore) Delete(id uuid.UUID) error {
 	q := "DELETE FROM outbox WHERE id = ?"
-	if _, err := o.db.ExecContext(context.Background(), q, id); err != nil {
+	if _, err := o.db.ExecContext(context.Background(), q, id.String()); err != nil {
 		return fmt.Errorf("store: outbox delete: %w", err)
 	}
 	return nil
 }
 
-func (o *OutboxStore) IncrementRetry(id string) error {
+func (o *OutboxStore) IncrementRetry(id uuid.UUID) error {
 	q := "UPDATE outbox SET retry_count = retry_count + 1 WHERE id = ?"
-	if _, err := o.db.ExecContext(context.Background(), q, id); err != nil {
+	if _, err := o.db.ExecContext(context.Background(), q, id.String()); err != nil {
 		return fmt.Errorf("store: outbox increment retry: %w", err)
 	}
 	return nil

@@ -41,4 +41,7 @@ func (c *Client) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /admin/outbox", c.localhostOnly(c.adminListOutbox))
 	mux.HandleFunc("DELETE /admin/outbox/{id}", c.localhostOnly(c.adminDeleteOutboxEntry))
 	mux.HandleFunc("POST /admin/outbox/flush/{pubKey}", c.localhostOnly(c.adminFlushOutbox))
+	mux.HandleFunc("PUT /admin/profile", c.localhostOnly(c.adminUpdateProfile))
+	mux.HandleFunc("DELETE /admin/profile/picture", c.localhostOnly(c.adminDeleteProfilePic))
+	mux.HandleFunc("GET /admin/me", c.localhostOnly(c.adminGetMe))
 }

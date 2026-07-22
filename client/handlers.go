@@ -69,6 +69,12 @@ func (c *Client) handleWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if _, loaded := c.sessions.Load(pubKey); loaded {
+		c.log.DebugContext(r.Context(), "session already active, rejecting connection", "pub_key", pubKey)
+		http.Error(w, "session already active\n", http.StatusConflict)
+		return
+	}
+
 	upgrader := websocket.Upgrader{
 		CheckOrigin:       func(_ *http.Request) bool { return true },
 		EnableCompression: true,
@@ -104,7 +110,7 @@ func (c *Client) startSession(ctx context.Context, conn *websocket.Conn, pubKey,
 		return conn.SetReadDeadline(time.Now().Add(c.Timeout))
 	})
 
-	sess := newSession(conn, c.Name, c.Keys, c.log, c.Timeout, c.RateLimit, c.RateWindow)
+	sess := newSession(conn, c.getName(), c.Keys, c.log, c.Timeout, c.RateLimit, c.RateWindow)
 	sess.setStatus(status)
 
 	if err := sess.handshake(ctx, false); err != nil {
@@ -116,6 +122,10 @@ func (c *Client) startSession(ctx context.Context, conn *websocket.Conn, pubKey,
 	c.sessions.Store(pubKey, sess)
 	_ = c.Store.KnownPeers.SetName(pubKey, sess.peerName())
 	c.flushOutbox(pubKey)
+
+	if status == store.PeerStatusPending {
+		c.requestPeerInfo(sess)
+	}
 
 	c.log.DebugContext(ctx, "session ready",
 		"remote", conn.RemoteAddr(), "pub_key", pubKey,

@@ -7,12 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net"
 	"net/http"
 	"strconv"
 
 	"github.com/JspBack/end-to-end-chat/config"
 	"github.com/JspBack/end-to-end-chat/message"
+	"github.com/JspBack/end-to-end-chat/signal"
 	"github.com/JspBack/end-to-end-chat/store"
 	"github.com/google/uuid"
 )
@@ -25,17 +27,18 @@ const (
 	statusDeleted      = "deleted"
 	statusUpdated      = "updated"
 	statusFlushed      = "flushed"
-	statusNicknameSet  = "nickname_set"
+	statusInfoDeleted  = "info_deleted"
+	statusInfoChanged  = "info_changed"
 )
 
 type statusResponse struct {
 	Status string `json:"status"`
 }
 
-func (c *Client) msgResponse(msg *message.Message) interface{} {
+func (c *Client) msgResponse(msg *message.Message) any {
 	from := ""
 	if msg.FromPubKey == c.Keys.Public {
-		from = c.Name
+		from = c.getName()
 	} else if msg.FromPubKey != "" {
 		if peer, err := c.Store.KnownPeers.Get(msg.FromPubKey); err == nil {
 			if peer.Nickname != "" {
@@ -143,6 +146,14 @@ func (c *Client) adminAcceptPeer(w http.ResponseWriter, r *http.Request) {
 	pubKey := r.PathValue("pubKey")
 	c.adminUpdatePeerStatus(w, r, store.PeerStatusAccepted)
 	c.updateSessionStatus(pubKey, store.PeerStatusAccepted)
+
+	sig := signal.New(signal.TypePeerAccepted, c.Keys.Public, uuid.Nil, nil)
+	if v, loaded := c.sessions.Load(pubKey); loaded {
+		if sess, ok := v.(*Session); ok {
+			_ = sess.send(sig)
+		}
+	}
+
 	c.log.InfoContext(r.Context(), "peer accepted", "pub_key", pubKey)
 }
 
@@ -160,7 +171,7 @@ func (c *Client) adminListSessions(w http.ResponseWriter, _ *http.Request) {
 		Name   string `json:"name"`
 	}
 	out := make([]sessionInfo, 0)
-	c.sessions.Range(func(key, value interface{}) bool {
+	c.sessions.Range(func(key, value any) bool {
 		sess, ok := value.(*Session)
 		if !ok {
 			return true
@@ -169,7 +180,8 @@ func (c *Client) adminListSessions(w http.ResponseWriter, _ *http.Request) {
 		if !ok {
 			return true
 		}
-		out = append(out, sessionInfo{PubKey: pk, Status: sess.status(), Name: sess.peerName()})
+		name := c.displayNameForPubKey(pk)
+		out = append(out, sessionInfo{PubKey: pk, Status: sess.status(), Name: name})
 		return true
 	})
 	w.Header().Set("Content-Type", "application/json")
@@ -238,7 +250,7 @@ func (c *Client) sendAttachments(ctx context.Context, pubKey string, attachments
 	for _, att := range attachments {
 		fileReader := io.LimitReader(bytes.NewReader(att.Data), att.Size)
 		if sendErr := c.sendFile(sess, att.ID, att.Name, att.MIMEType, att.Size, fileReader); sendErr != nil {
-			c.log.WarnContext(ctx, "send file failed", "id", att.ID, "error", sendErr)
+			c.log.WarnContext(ctx, "send file failed", "id", att.ID.String(), "error", sendErr)
 		}
 	}
 }
@@ -293,9 +305,9 @@ func (c *Client) apiSendMessage(w http.ResponseWriter, r *http.Request) {
 
 	haveFiles := len(attachments) > 0
 	if haveFiles {
-		msg.ID = uuid.New().String()
+		msg.ID = uuid.New()
 		for i := range attachments {
-			attachments[i].ID = uuid.New().String()
+			attachments[i].ID = uuid.New()
 		}
 		msg.Attachments = make([]message.Attachment, len(attachments))
 		for i, a := range attachments {
@@ -311,8 +323,9 @@ func (c *Client) apiSendMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if haveFiles {
-		c.sendAttachments(r.Context(), pubKey, attachments, msg.ID)
-		if storeErr := message.StoreAttachments(c.Store, c.Keys.Private, msg.ID, attachments); storeErr != nil {
+		msgID := msg.ID.String()
+		c.sendAttachments(r.Context(), pubKey, attachments, msgID)
+		if storeErr := message.StoreAttachments(c.Store, c.Keys.Private, msgID, attachments); storeErr != nil {
 			c.log.WarnContext(r.Context(), "store attachments failed", "error", storeErr)
 		}
 	}
@@ -379,9 +392,9 @@ func (c *Client) apiListMessages(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (c *Client) apiGetMessage(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	if id == "" {
-		http.Error(w, "missing id\n", http.StatusBadRequest)
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		http.Error(w, "invalid id\n", http.StatusBadRequest)
 		return
 	}
 
@@ -411,7 +424,7 @@ func (c *Client) apiSearchMessages(w http.ResponseWriter, r *http.Request) {
 		results = []message.Message{}
 	}
 
-	resp := make([]interface{}, len(results))
+	resp := make([]any, len(results))
 	for i := range results {
 		resp[i] = c.msgResponse(&results[i])
 	}
@@ -420,7 +433,7 @@ func (c *Client) apiSearchMessages(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
-func (c *Client) getOwnedMessage(id string) (*message.Message, error) {
+func (c *Client) getOwnedMessage(id uuid.UUID) (*message.Message, error) {
 	msg, err := message.Get(c.Store, c.Keys.Private, id)
 	if err != nil {
 		return nil, fmt.Errorf("get message: %w", err)
@@ -432,9 +445,9 @@ func (c *Client) getOwnedMessage(id string) (*message.Message, error) {
 }
 
 func (c *Client) apiUpdateMessage(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	if id == "" {
-		http.Error(w, "missing id\n", http.StatusBadRequest)
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		http.Error(w, "invalid id\n", http.StatusBadRequest)
 		return
 	}
 
@@ -461,7 +474,7 @@ func (c *Client) apiUpdateMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	msg.Content = req.Content
-	if updateErr := message.Update(c.Store, c.Keys.Private, id, c.Name, msg); updateErr != nil {
+	if updateErr := message.Update(c.Store, c.Keys.Private, id, c.getName(), msg); updateErr != nil {
 		http.Error(w, updateErr.Error()+"\n", http.StatusInternalServerError)
 		return
 	}
@@ -473,13 +486,13 @@ func (c *Client) apiUpdateMessage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (c *Client) apiDeleteMessage(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	if id == "" {
-		http.Error(w, "missing id\n", http.StatusBadRequest)
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		http.Error(w, "invalid id\n", http.StatusBadRequest)
 		return
 	}
 
-	_, err := c.getOwnedMessage(id)
+	_, err = c.getOwnedMessage(id)
 	if errors.Is(err, errNotOwner) {
 		http.Error(w, "cannot delete another user's message\n", http.StatusForbidden)
 		return
@@ -501,9 +514,9 @@ func (c *Client) apiDeleteMessage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (c *Client) apiGetFile(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	if id == "" {
-		http.Error(w, "missing id\n", http.StatusBadRequest)
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		http.Error(w, "invalid id\n", http.StatusBadRequest)
 		return
 	}
 
@@ -532,12 +545,12 @@ func (c *Client) adminListOutbox(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (c *Client) adminDeleteOutboxEntry(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	if id == "" {
-		http.Error(w, "missing id\n", http.StatusBadRequest)
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		http.Error(w, "invalid id\n", http.StatusBadRequest)
 		return
 	}
-	if err := c.Store.Outbox.Delete(id); err != nil {
+	if err = c.Store.Outbox.Delete(id); err != nil {
 		http.Error(w, err.Error()+"\n", http.StatusInternalServerError)
 		return
 	}
@@ -554,4 +567,82 @@ func (c *Client) adminFlushOutbox(w http.ResponseWriter, r *http.Request) {
 	c.flushOutbox(pubKey)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(statusResponse{Status: statusFlushed})
+}
+
+func (c *Client) adminUpdateProfile(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseMultipartForm(config.MultipartMemBuf); err != nil {
+		http.Error(w, "invalid form\n", http.StatusBadRequest)
+		return
+	}
+
+	changed := false
+	if name := r.FormValue("name"); name != "" {
+		c.setName(name)
+		changed = true
+	}
+
+	file, _, err := r.FormFile("file")
+	if err == nil {
+		defer file.Close()
+		data, readErr := io.ReadAll(io.LimitReader(file, config.MaxProfilePicSize))
+		if readErr != nil {
+			http.Error(w, "read file failed\n", http.StatusInternalServerError)
+			return
+		}
+
+		oldPic := c.Info().ProfilePic
+
+		fileID := uuid.New()
+		if storeErr := c.Store.Files.PutWithID(c.Keys.Private, fileID, "", data); storeErr != nil {
+			http.Error(w, "store file failed\n", http.StatusInternalServerError)
+			return
+		}
+
+		if oldPic != uuid.Nil {
+			_ = c.Store.Files.Delete(oldPic)
+		}
+
+		_ = c.Store.Profile.SetProfilePic(fileID)
+		changed = true
+	}
+
+	if changed {
+		c.broadcastInfoChanged()
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(statusResponse{Status: statusInfoChanged})
+}
+
+func (c *Client) adminDeleteProfilePic(w http.ResponseWriter, _ *http.Request) {
+	info := c.Info()
+	if info.ProfilePic != uuid.Nil {
+		_ = c.Store.Files.Delete(info.ProfilePic)
+	}
+	_ = c.Store.Profile.SetProfilePic(uuid.Nil)
+	c.broadcastInfoChanged()
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(statusResponse{Status: statusInfoDeleted})
+}
+
+func (c *Client) adminGetMe(w http.ResponseWriter, _ *http.Request) {
+	info := c.Info()
+
+	var buf bytes.Buffer
+	mp := multipart.NewWriter(&buf)
+	w.Header().Set("Content-Type", mp.FormDataContentType())
+
+	namePart, _ := mp.CreateFormField("name")
+	_, _ = namePart.Write([]byte(info.Name))
+
+	if info.ProfilePic != uuid.Nil {
+		data, err := c.Store.Files.Get(c.Keys.Private, info.ProfilePic)
+		if err == nil {
+			pic, _ := mp.CreateFormFile("file", "pic")
+			_, _ = pic.Write(data)
+		}
+	}
+	mp.Close()
+	_, _ = w.Write(buf.Bytes())
 }
