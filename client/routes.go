@@ -28,6 +28,7 @@ func (c *Client) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /admin/peers/{pubKey}/accept", c.localhostOnly(c.adminAcceptPeer))
 	mux.HandleFunc("PUT /admin/peers/{pubKey}/reject", c.localhostOnly(c.adminRejectPeer))
 	mux.HandleFunc("GET /admin/sessions", c.localhostOnly(c.adminListSessions))
+	mux.HandleFunc("DELETE /admin/sessions/{pubKey}", c.localhostOnly(c.adminDeleteSession))
 	mux.HandleFunc("POST /api/peers/connect", c.localhostOnly(c.apiConnectPeer))
 	mux.HandleFunc("POST /api/messages/{pubKey}", c.localhostOnly(c.apiSendMessage))
 	mux.HandleFunc("GET /api/messages", c.localhostOnly(c.apiListMessages))
@@ -36,4 +37,7 @@ func (c *Client) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/messages/{id}", c.localhostOnly(c.apiUpdateMessage))
 	mux.HandleFunc("DELETE /api/messages/{id}", c.localhostOnly(c.apiDeleteMessage))
 	mux.HandleFunc("GET /api/files/{id}", c.localhostOnly(c.apiGetFile))
+	mux.HandleFunc("GET /admin/outbox", c.localhostOnly(c.adminListOutbox))
+	mux.HandleFunc("DELETE /admin/outbox/{id}", c.localhostOnly(c.adminDeleteOutboxEntry))
+	mux.HandleFunc("POST /admin/outbox/flush/{pubKey}", c.localhostOnly(c.adminFlushOutbox))
 }

@@ -29,22 +29,24 @@ td button { margin: 0 2px; padding: 4px 8px; font-size: 0.75rem; }
 .section-sessions { background: #f3e8fd; }
 .section-connect { background: #e8f5e9; }
 .section-send { background: #fff3e0; }
+.section-outbox { background: #f1f8e9; }
 .section-messages { background: #fce4ec; }
 .section-search { background: #e0f2fe; }
 </style>
 
-<pre style="background:none;border:none;padding:0;margin-bottom:12px;font-size:0.85rem;color:#888;">target: {{TARGET}}</pre>
+<div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
+  <pre style="background:none;border:none;padding:0;margin:0;font-size:0.85rem;color:#888;">target: {{TARGET}}</pre>
+  <button type="button" class="btn-primary" onclick="refreshAll()">refresh all</button>
+</div>
 
 <div class="section section-peers">
   <h2>Peers</h2>
-  <table><thead><tr><th>pubkey</th><th>addr</th><th>status</th><th></th></tr></thead><tbody id="peers"></tbody></table>
-  <button type="button" class="btn-primary" onclick="loadPeers()">refresh</button>
+  <table><thead><tr><th>pubkey</th><th>addr</th><th>status</th><th>online</th><th>last seen</th><th></th></tr></thead><tbody id="peers"></tbody></table>
 </div>
 
 <div class="section section-sessions">
   <h2>Sessions</h2>
-  <table><thead><tr><th>pubkey</th><th>name</th><th>status</th></tr></thead><tbody id="sessions"></tbody></table>
-  <button type="button" class="btn-primary" onclick="loadSessions()">refresh</button>
+  <table><thead><tr><th>pubkey</th><th>name</th><th>status</th><th></th></tr></thead><tbody id="sessions"></tbody></table>
 </div>
 
 <div class="section section-connect">
@@ -63,10 +65,14 @@ td button { margin: 0 2px; padding: 4px 8px; font-size: 0.75rem; }
   <pre id="send-result"></pre>
 </div>
 
+<div class="section section-outbox">
+  <h2>Outbox</h2>
+  <table><thead><tr><th>id</th><th>target</th><th>type</th><th>created</th><th>retry</th><th></th></tr></thead><tbody id="outbox"></tbody></table>
+</div>
+
 <div class="section section-messages">
   <h2>Messages</h2>
   <table><thead><tr><th>id</th><th>created</th><th></th></tr></thead><tbody id="messages"></tbody></table>
-  <button type="button" class="btn-primary" onclick="loadMessages()">refresh</button>
   <pre id="message-detail"></pre>
 </div>
 
@@ -89,6 +95,8 @@ async function loadPeers() {
   const data = await api('/admin/peers') || [];
   document.getElementById('peers').innerHTML = data.map(p => `<tr>
     <td>${p.pub_key}</td><td>${p.peer_ip}</td><td><span class="badge badge-${p.status}">${p.status}</span></td>
+    <td>${p.online ? '<span class="badge" style="background:#e8f5e9;color:#2e7d32">online</span>' : '<span class="badge" style="background:#f5f5f5;color:#999">offline</span>'}</td>
+    <td style="font-size:0.75rem">${p.last_seen || '-'}</td>
     <td>
       <button type="button" class="btn-success" onclick="updatePeer('${p.pub_key}','accept')">accept</button>
       <button type="button" class="btn-danger" onclick="updatePeer('${p.pub_key}','reject')">reject</button>
@@ -103,6 +111,7 @@ async function loadSessions() {
   const data = await api('/admin/sessions') || [];
   document.getElementById('sessions').innerHTML = data.map(s => `<tr>
     <td>${s.pub_key}</td><td>${s.name || '-'}</td><td><span class="badge badge-${s.status}">${s.status}</span></td>
+    <td><button type="button" class="btn-danger" onclick="disconnectSession('${s.pub_key}')">disconnect</button></td>
   </tr>`).join('');
 }
 async function loadMessages() {
@@ -184,6 +193,44 @@ async function searchMessages() {
       : 'no results';
   } catch (e) { document.getElementById('search-result').textContent = 'error: ' + e.message; }
 }
+async function loadOutbox() {
+  const data = await api('/admin/outbox') || [];
+  document.getElementById('outbox').innerHTML = data.map(e => `<tr>
+    <td style="font-size:0.7rem">${e.id}</td>
+    <td style="font-size:0.7rem">${e.target_pub_key}</td>
+    <td><span class="badge">${e.signal_type || '-'}</span></td>
+    <td style="font-size:0.7rem">${e.created_at}</td>
+    <td>${e.retry_count}</td>
+    <td>
+      <button type="button" class="btn-success" onclick="flushOutbox('${e.target_pub_key}')">flush</button>
+      <button type="button" class="btn-danger" onclick="deleteOutboxEntry('${e.id}')">del</button>
+    </td>
+  </tr>`).join('');
+  if (!data.length) document.getElementById('outbox').innerHTML = '<tr><td colspan="6" style="text-align:center;color:#999;padding:16px">no queued messages</td></tr>';
+}
+async function flushOutbox(pk) {
+  try {
+    const r = await api(`/admin/outbox/flush/${pk}`, { method: 'POST' });
+    loadOutbox();
+  } catch (e) { alert(e.message); }
+}
+async function deleteOutboxEntry(id) {
+  if (!confirm('remove outbox entry ' + id + '?')) return;
+  try {
+    const r = await api(`/admin/outbox/${id}`, { method: 'DELETE' });
+    loadOutbox();
+  } catch (e) { alert(e.message); }
+}
+async function disconnectSession(pk) {
+  if (!confirm('disconnect session ' + pk.slice(0,12) + '...?')) return;
+  try {
+    const r = await api(`/admin/sessions/${pk}`, { method: 'DELETE' });
+    loadSessions();
+  } catch (e) { alert(e.message); }
+}
+async function refreshAll() {
+  await Promise.all([loadPeers(), loadSessions(), loadOutbox(), loadMessages()]);
+}
 function escapeHtml(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 window.updatePeer = updatePeer;
 window.connectPeer = connectPeer;
@@ -192,8 +239,10 @@ window.viewMessage = viewMessage;
 window.searchMessages = searchMessages;
 window.updateMessage = updateMessage;
 window.deleteMessage = deleteMessage;
-loadPeers(); loadSessions(); loadMessages();
-setInterval(loadPeers, 5000);
-setInterval(loadSessions, 5000);
-setInterval(loadMessages, 5000);
+window.flushOutbox = flushOutbox;
+window.deleteOutboxEntry = deleteOutboxEntry;
+window.disconnectSession = disconnectSession;
+window.refreshAll = refreshAll;
+refreshAll();
+setInterval(refreshAll, 5000);
 </script>

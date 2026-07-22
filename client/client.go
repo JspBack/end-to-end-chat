@@ -23,11 +23,6 @@ import (
 	"github.com/go-chi/httprate"
 )
 
-const (
-	fileChunkSize = 256 << 10
-	fileIDLen     = 36
-)
-
 type fileMeta struct {
 	Name string `json:"name"`
 	Size int64  `json:"size"`
@@ -138,14 +133,14 @@ func (c *Client) sendFile(sess *Session, id, name, mimeType string, size int64, 
 	if err := sess.send(signal.New(signal.TypeFileMeta, c.Keys.Public, id, metaRaw)); err != nil {
 		return fmt.Errorf("send file meta: %w", err)
 	}
-	buf := make([]byte, fileChunkSize)
+	buf := make([]byte, config.FileChunkSize)
 	var sent int64
 	for {
 		n, err := data.Read(buf)
 		if n > 0 {
-			plain := make([]byte, fileIDLen+n)
+			plain := make([]byte, config.FileIDLen+n)
 			copy(plain, []byte(id))
-			copy(plain[fileIDLen:], buf[:n])
+			copy(plain[config.FileIDLen:], buf[:n])
 			if sendErr := sess.send(plain); sendErr != nil {
 				return fmt.Errorf("send file chunk: %w", sendErr)
 			}
@@ -163,8 +158,67 @@ func (c *Client) sendFile(sess *Session, id, name, mimeType string, size int64, 
 	return nil
 }
 
+func (c *Client) queueSignal(targetPubKey string, sig []byte) error {
+	_, err := c.Store.Outbox.Put(targetPubKey, sig, c.Keys.Private)
+	if err != nil {
+		return fmt.Errorf("queue signal: %w", err)
+	}
+	return nil
+}
+
+func (c *Client) sendMessageToPeer(targetPubKey string, msg *message.Message) error {
+	msg.FromPubKey = c.Keys.Public
+	if _, err := message.Put(c.Store, c.Keys.Private, msg); err != nil {
+		c.log.Warn("store message failed", "error", err)
+	}
+	payload, err := json.Marshal(msg)
+	if err != nil {
+		return fmt.Errorf("encode message: %w", err)
+	}
+	sig := signal.New(signal.TypeMessage, c.Keys.Public, "", payload)
+
+	v, ok := c.sessions.Load(targetPubKey)
+	if !ok {
+		return c.queueSignal(targetPubKey, sig)
+	}
+	sess, ok := v.(*Session)
+	if !ok || sess.status() != store.PeerStatusAccepted {
+		return c.queueSignal(targetPubKey, sig)
+	}
+	return sess.send(sig)
+}
+
+func (c *Client) flushOutbox(pubKey string) {
+	entries, err := c.Store.Outbox.GetPending(pubKey, c.Keys.Private)
+	if err != nil {
+		c.log.Warn("flush outbox: get pending", "error", err)
+		return
+	}
+	if len(entries) == 0 {
+		return
+	}
+	v, ok := c.sessions.Load(pubKey)
+	if !ok {
+		return
+	}
+	sess, ok := v.(*Session)
+	if !ok || sess.status() != store.PeerStatusAccepted {
+		return
+	}
+
+	for _, entry := range entries {
+		if sendErr := sess.send(entry.SignalContent); sendErr != nil {
+			_ = c.Store.Outbox.IncrementRetry(entry.ID)
+			return
+		}
+		if delErr := c.Store.Outbox.Delete(entry.ID); delErr != nil {
+			c.log.Warn("flush outbox: delete delivered entry", "entry_id", entry.ID, "error", delErr)
+		}
+	}
+}
+
 func (c *Client) sendToAll(content string) {
-	now := time.Now().Format(time.RFC3339)
+	now := time.Now().UTC().Format(time.RFC3339)
 	c.sessions.Range(func(_, value interface{}) bool {
 		if sess, ok := value.(*Session); ok {
 			msg := message.NewMessage(c.Name, sess.peerName(), content)
@@ -246,12 +300,12 @@ func (c *Client) handleSignal(sig *signal.Signal, pubKey string) {
 }
 
 func (c *Client) handleFileChunk(plain []byte) {
-	if len(plain) < fileIDLen {
+	if len(plain) < config.FileIDLen {
 		c.log.Warn("file chunk too short")
 		return
 	}
-	id := string(plain[:fileIDLen])
-	data := plain[fileIDLen:]
+	id := string(plain[:config.FileIDLen])
+	data := plain[config.FileIDLen:]
 
 	c.pendingMu.Lock()
 	pf, ok := c.pendingFiles[id]

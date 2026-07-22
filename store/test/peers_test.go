@@ -1,16 +1,16 @@
-package test_test
+package store_test
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/JspBack/end-to-end-chat/store"
 )
 
 func TestKnownPeersAddGet(t *testing.T) {
-	dir := "test_peers_addget"
+	dir := filepath.Join(t.TempDir(), "test_peers_addget")
 	s := store.New(dir)
-	defer os.Remove(dbPath(dir))
 
 	peer := &store.KnownPeer{PubKey: "abc123", PeerIP: "10.0.0.1", Status: store.PeerStatusPending}
 	err := s.KnownPeers.Add(peer)
@@ -28,9 +28,8 @@ func TestKnownPeersAddGet(t *testing.T) {
 }
 
 func TestKnownPeersGetNotFound(t *testing.T) {
-	dir := "test_peers_notfound"
+	dir := filepath.Join(t.TempDir(), "test_peers_notfound")
 	s := store.New(dir)
-	defer os.Remove(dbPath(dir))
 
 	_, err := s.KnownPeers.Get("nonexistent")
 	if !os.IsNotExist(err) {
@@ -39,9 +38,8 @@ func TestKnownPeersGetNotFound(t *testing.T) {
 }
 
 func TestKnownPeersReplace(t *testing.T) {
-	dir := "test_peers_replace"
+	dir := filepath.Join(t.TempDir(), "test_peers_replace")
 	s := store.New(dir)
-	defer os.Remove(dbPath(dir))
 
 	s.KnownPeers.Add(&store.KnownPeer{PubKey: "k1", PeerIP: "10.0.0.1", Status: store.PeerStatusPending})
 	s.KnownPeers.Add(&store.KnownPeer{PubKey: "k1", PeerIP: "10.0.0.2", Status: store.PeerStatusAccepted})
@@ -56,9 +54,8 @@ func TestKnownPeersReplace(t *testing.T) {
 }
 
 func TestKnownPeersList(t *testing.T) {
-	dir := "test_peers_list"
+	dir := filepath.Join(t.TempDir(), "test_peers_list")
 	s := store.New(dir)
-	defer os.Remove(dbPath(dir))
 
 	s.KnownPeers.Add(&store.KnownPeer{PubKey: "k1", PeerIP: "10.0.0.1", Status: store.PeerStatusPending})
 	s.KnownPeers.Add(&store.KnownPeer{PubKey: "k2", PeerIP: "10.0.0.2", Status: store.PeerStatusAccepted})
@@ -73,9 +70,8 @@ func TestKnownPeersList(t *testing.T) {
 }
 
 func TestKnownPeersListEmpty(t *testing.T) {
-	dir := "test_peers_empty"
+	dir := filepath.Join(t.TempDir(), "test_peers_empty")
 	s := store.New(dir)
-	defer os.Remove(dbPath(dir))
 
 	list, err := s.KnownPeers.List()
 	if err != nil {
@@ -87,9 +83,8 @@ func TestKnownPeersListEmpty(t *testing.T) {
 }
 
 func TestKnownPeersRemove(t *testing.T) {
-	dir := "test_peers_remove"
+	dir := filepath.Join(t.TempDir(), "test_peers_remove")
 	s := store.New(dir)
-	defer os.Remove(dbPath(dir))
 
 	s.KnownPeers.Add(&store.KnownPeer{PubKey: "k1", PeerIP: "10.0.0.1", Status: store.PeerStatusPending})
 	err := s.KnownPeers.Remove("k1")
@@ -104,9 +99,8 @@ func TestKnownPeersRemove(t *testing.T) {
 }
 
 func TestKnownPeersRemoveTwice(t *testing.T) {
-	dir := "test_peers_rm2"
+	dir := filepath.Join(t.TempDir(), "test_peers_rm2")
 	s := store.New(dir)
-	defer os.Remove(dbPath(dir))
 
 	s.KnownPeers.Add(&store.KnownPeer{PubKey: "k1", PeerIP: "10.0.0.1", Status: store.PeerStatusPending})
 	s.KnownPeers.Remove("k1")

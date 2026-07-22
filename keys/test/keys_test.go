@@ -1,4 +1,4 @@
-package test_test
+package keys_test
 
 import (
 	"encoding/hex"

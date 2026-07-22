@@ -6,10 +6,11 @@ import (
 )
 
 const (
-	TypeMessage  = "message"
-	TypeDelete   = "delete"
-	TypeUpdate   = "update"
-	TypeFileMeta = "file_meta"
+	TypeMessage     = "message"
+	TypeDelete      = "delete"
+	TypeUpdate      = "update"
+	TypeFileMeta    = "file_meta"
+	TypeKeyExchange = "key_exchange"
 )
 
 type Signal struct {

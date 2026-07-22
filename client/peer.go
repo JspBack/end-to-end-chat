@@ -106,12 +106,11 @@ func (c *Client) connectAndChat(ctx context.Context, lines <-chan string) error 
 	defer cancel()
 
 	errCh := make(chan error, 2)
-	go func() { errCh <- c.peerReadLoop(sess) }()
+	go func() { errCh <- c.readLoop(pctx, sess) }()
 	go func() { c.peerWriteLoop(pctx, sess, lines); errCh <- nil }()
 
 	select {
 	case e := <-errCh:
-		cancel()
 		return &disconnectedError{err: e}
 	case <-ctx.Done():
 		return nil
@@ -130,7 +129,7 @@ func (c *Client) connectSession(ctx context.Context, addr string) error {
 		Status: store.PeerStatusAccepted,
 	})
 
-	go func() { _ = c.peerReadLoop(sess) }()
+	go func() { _ = c.readLoop(ctx, sess) }()
 	return nil
 }
 
@@ -139,39 +138,12 @@ func (c *Client) storeSession(sess *Session) {
 	sess.setStatus(store.PeerStatusAccepted)
 	if old, loaded := c.sessions.LoadAndDelete(pubKey); loaded {
 		if oldSess, ok := old.(*Session); ok {
+			_ = c.Store.KnownPeers.SetLastSeen(pubKey, time.Now().UTC().Format(time.RFC3339))
 			_ = oldSess.closeConn()
 		}
 	}
 	c.sessions.Store(pubKey, sess)
-}
-
-func (c *Client) peerReadLoop(sess *Session) error {
-	conn := sess.conn
-	conn.SetReadLimit(c.MaxMessageSize)
-
-	defer func() {
-		c.sessions.Delete(sess.peerPubKey())
-		_ = sess.closeConn()
-	}()
-
-	for {
-		if err := conn.SetReadDeadline(time.Now().Add(60 * time.Second)); err != nil {
-			return fmt.Errorf("set read deadline: %w", err)
-		}
-
-		_, data, err := conn.ReadMessage()
-		if err != nil {
-			return fmt.Errorf("read: %w", err)
-		}
-
-		plain, err := sess.decrypt(data)
-		if err != nil {
-			c.log.Warn("decrypt error", "error", err)
-			continue
-		}
-
-		c.handleDecrypted(plain, sess, sess.peerPubKey())
-	}
+	c.flushOutbox(pubKey)
 }
 
 func (c *Client) peerWriteLoop(ctx context.Context, sess *Session, lines <-chan string) {

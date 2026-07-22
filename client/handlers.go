@@ -3,20 +3,20 @@ package client
 import (
 	"context"
 	"encoding/hex"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/JspBack/end-to-end-chat/config"
 	"github.com/JspBack/end-to-end-chat/store"
 	"github.com/gorilla/websocket"
 )
 
-const pubKeyLen = 64
-
 func isValidPubKey(s string) bool {
-	if len(s) != pubKeyLen {
+	if len(s) != config.PubKeyLen {
 		return false
 	}
 	b, err := hex.DecodeString(s)
@@ -92,6 +92,7 @@ func (c *Client) closeExistingSession(pubKey string, conn *websocket.Conn) {
 	if old, loaded := c.sessions.LoadAndDelete(pubKey); loaded {
 		if oldSess, ok := old.(*Session); ok {
 			c.log.Debug("replacing existing session", "pub_key", pubKey, "remote", conn.RemoteAddr())
+			_ = c.Store.KnownPeers.SetLastSeen(pubKey, time.Now().UTC().Format(time.RFC3339))
 			_ = oldSess.closeConn()
 		}
 	}
@@ -113,6 +114,7 @@ func (c *Client) startSession(ctx context.Context, conn *websocket.Conn, pubKey,
 	}
 
 	c.sessions.Store(pubKey, sess)
+	c.flushOutbox(pubKey)
 
 	c.log.DebugContext(ctx, "session ready",
 		"remote", conn.RemoteAddr(), "pub_key", pubKey,
@@ -123,7 +125,7 @@ func (c *Client) startSession(ctx context.Context, conn *websocket.Conn, pubKey,
 	defer cancel()
 	go c.pingLoop(ctx, sess, cancel)
 
-	c.recvLoop(ctx, sess, pubKey)
+	_ = c.readLoop(ctx, sess)
 }
 
 func (c *Client) pingLoop(ctx context.Context, sess *Session, cancel context.CancelFunc) {
@@ -145,34 +147,24 @@ func (c *Client) pingLoop(ctx context.Context, sess *Session, cancel context.Can
 	}
 }
 
-func (c *Client) recvLoop(ctx context.Context, sess *Session, pubKey string) {
+func (c *Client) readLoop(ctx context.Context, sess *Session) error {
+	pubKey := sess.peerPubKey()
 	defer func() {
 		c.sessions.Delete(pubKey)
+		_ = c.Store.KnownPeers.SetLastSeen(pubKey, time.Now().UTC().Format(time.RFC3339))
 		_ = sess.closeConn()
 	}()
 
-	done := make(chan struct{})
-	defer close(done)
-
-	go func() {
-		select {
-		case <-ctx.Done():
-			sess.conn.Close()
-		case <-done:
-		}
-	}()
+	sess.conn.SetReadLimit(c.MaxMessageSize)
 
 	for {
 		if err := sess.conn.SetReadDeadline(time.Now().Add(sess.timeout)); err != nil {
-			c.log.WarnContext(ctx, "set read deadline failed", "error", err)
-			return
+			return fmt.Errorf("set read deadline: %w", err)
 		}
 
 		_, data, err := sess.conn.ReadMessage()
 		if err != nil {
-			c.log.DebugContext(ctx, "peer disconnected",
-				"remote", sess.conn.RemoteAddr(), "error", err)
-			return
+			return fmt.Errorf("read: %w", err)
 		}
 
 		plain, err := sess.decrypt(data)
