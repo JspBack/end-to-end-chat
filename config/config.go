@@ -11,8 +11,6 @@ import (
 
 var Version = "placeholder"
 
-const maxNameLen = 64
-
 const (
 	DefaultClientName       = "default"
 	DefaultPort             = 8080
@@ -20,13 +18,18 @@ const (
 	DefaultRateLimit        = 100
 	DefaultRateWindow       = time.Minute
 	MaxMessageSize    int64 = 50 << 20
-	DefaultPingWindow       = 5 * time.Second
 
-	PubKeyLen       = 64
-	FileChunkSize   = 256 << 10
-	FileIDLen       = 36
-	NonceSize       = 12
-	MultipartMemBuf = 10 << 20
+	MaxProfilePicSize    int64 = 2 << 20
+	DefaultPingWindow          = 5 * time.Second
+	PubKeyLen                  = 64
+	FileChunkSize              = 256 << 10
+	FileIDLen                  = 16
+	NonceSize                  = 12
+	AesKeySize                 = 32
+	MultipartMemBuf            = 10 << 20
+	CacheDefaultExp            = 10 * time.Minute
+	CacheCleanUpInterval       = 10 * time.Minute
+	maxNameLen                 = 64
 )
 
 type Config struct {
@@ -40,9 +43,8 @@ type Config struct {
 	PingWindow     time.Duration
 	CertFile       string
 	KeyFileTLS     string
-
-	PeerAddr  string
-	WriteMode bool
+	PeerAddr       string
+	WriteMode      bool
 }
 
 func sanitizeName(s string) string {

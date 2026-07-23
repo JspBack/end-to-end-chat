@@ -10,14 +10,14 @@ import (
 func TestAutoLoadAndSign(t *testing.T) {
 	k := keys.AutoLoad()
 
-	if k.Public == "" {
+	if k.Public == keys.NilKey {
 		t.Error("Public key is empty")
 	}
-	if k.Private == "" {
+	if k.Private == keys.NilKey {
 		t.Error("Private key is empty")
 	}
 
-	pubBytes, err := hex.DecodeString(k.Public)
+	pubBytes, err := hex.DecodeString(k.Public.String())
 	if err != nil {
 		t.Fatal("decode public:", err)
 	}
@@ -47,11 +47,9 @@ func TestAutoLoadVerifyWrongMessage(t *testing.T) {
 }
 
 func TestAutoLoadVerifyBadPubKey(t *testing.T) {
-	if keys.Verify("nothex", []byte("msg"), []byte("sig")) {
-		t.Error("Verify should return false for invalid hex key")
-	}
-	if keys.Verify("abcd", []byte("msg"), []byte("sig")) {
-		t.Error("Verify should return false for short key")
+	var badKey keys.Key
+	if keys.Verify(badKey, []byte("msg"), []byte("sig")) {
+		t.Error("Verify should return false for zero key")
 	}
 }
 

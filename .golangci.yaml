@@ -245,7 +245,7 @@ formatters:
       sections:
         - standard
         - default
-        - prefix(go-scrapper)
+        - prefix(github.com/JspBack/end-to-end-chat)
   exclusions:
     generated: lax
     paths:

@@ -45,8 +45,8 @@ func TestConstants(t *testing.T) {
 	if config.FileChunkSize != 256<<10 {
 		t.Errorf("FileChunkSize = %d, want 262144", config.FileChunkSize)
 	}
-	if config.FileIDLen != 36 {
-		t.Errorf("FileIDLen = %d, want 36", config.FileIDLen)
+	if config.FileIDLen != 16 {
+		t.Errorf("FileIDLen = %d, want 16", config.FileIDLen)
 	}
 	if config.NonceSize != 12 {
 		t.Errorf("NonceSize = %d, want 12", config.NonceSize)
