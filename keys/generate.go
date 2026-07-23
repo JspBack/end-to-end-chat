@@ -4,7 +4,6 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
-	"database/sql/driver"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -13,9 +12,6 @@ import (
 	"strings"
 )
 
-const minQuotedHexLen = 2
-
-//nolint:recvcheck // Unmarshal/Scan must be pointer receivers to satisfy
 type (
 	Key        [32]byte
 	PubKey     = Key
@@ -34,10 +30,6 @@ func (p Key) String() string {
 	return hex.EncodeToString(p[:])
 }
 
-func (p Key) MarshalJSON() ([]byte, error) {
-	return []byte(`"` + p.String() + `"`), nil
-}
-
 func FromHex(s string) (Key, error) {
 	if s == "" {
 		return NilKey, errors.New("keys: empty key")
@@ -52,63 +44,6 @@ func FromHex(s string) (Key, error) {
 	}
 	copy(k[:], buf)
 	return k, nil
-}
-
-func (p *Key) UnmarshalJSON(b []byte) error {
-	s, err := parseHexQuoted(b)
-	if err != nil {
-		return err
-	}
-	k, err := FromHex(s)
-	if err != nil {
-		return err
-	}
-	*p = k
-	return nil
-}
-
-func (p Key) MarshalBinary() ([]byte, error) {
-	return p[:], nil
-}
-
-func (p *Key) UnmarshalBinary(b []byte) error {
-	if len(b) != len(p) {
-		return fmt.Errorf("keys: unexpected binary length %d", len(b))
-	}
-	copy(p[:], b)
-	return nil
-}
-
-func (p Key) Value() (driver.Value, error) {
-	return p.String(), nil
-}
-
-func (p *Key) Scan(src any) error {
-	var s string
-	switch v := src.(type) {
-	case string:
-		s = v
-	case []byte:
-		s = string(v)
-	default:
-		return fmt.Errorf("keys: cannot scan type %T", src)
-	}
-	k, err := FromHex(s)
-	if err != nil {
-		return err
-	}
-	*p = k
-	return nil
-}
-
-func parseHexQuoted(b []byte) (string, error) {
-	if len(b) < minQuotedHexLen {
-		return "", errors.New("keys: too short for quoted hex")
-	}
-	if b[0] != '"' || b[len(b)-1] != '"' {
-		return "", errors.New("keys: not a quoted string")
-	}
-	return string(b[1 : len(b)-1]), nil
 }
 
 func generateRandomSeed() []byte {
