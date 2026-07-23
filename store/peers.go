@@ -36,7 +36,7 @@ type KnownPeer struct {
 	Status     PeerStatus `json:"status"`
 	Online     bool       `json:"online"`
 	LastSeen   time.Time  `json:"last_seen,omitzero"`
-	ProfilePic uuid.UUID  `json:"profile_pic,omitempty"`
+	ProfilePic uuid.UUID  `json:"profile_pic,omitzero"`
 }
 
 type KnownPeerStore struct {

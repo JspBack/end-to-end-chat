@@ -54,6 +54,14 @@ func (c *Client) ConnectToPeer(ctx context.Context) error {
 	}
 }
 
+func parsePeerIP(addr string) net.IP {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		host = addr
+	}
+	return net.ParseIP(host)
+}
+
 func readStdin(lines chan<- string) {
 	scanner := bufio.NewScanner(os.Stdin)
 	for scanner.Scan() {
@@ -105,7 +113,7 @@ func (c *Client) dialAndHandshake(ctx context.Context, addr string) (*Session, e
 
 	if isNew {
 		_ = c.Store.KnownPeers.Add(&store.KnownPeer{
-			PeerIP: net.ParseIP(addr),
+			PeerIP: parsePeerIP(addr),
 			PubKey: pubKey,
 			Name:   sess.peerName(),
 			Status: store.Accepted,

@@ -15,32 +15,34 @@ import (
 	"github.com/JspBack/end-to-end-chat/store"
 )
 
-const timeFieldSize = 8
+const (
+	idSize        = 16
+	u16Size       = 2
+	u32Size       = 4
+	u64Size       = 8
+	timeFieldSize = 8
+)
 
-func u16Len(n int) uint16 {
-	if n < 0 || n > math.MaxUint16 {
-		panic("message: length exceeds uint16")
-	}
-	return uint16(n)
+type unsignedWire interface {
+	~uint16 | ~uint32 | ~uint64
 }
 
-func u32Len(n int) uint32 {
-	if n < 0 || n > math.MaxUint32 {
-		panic("message: length exceeds uint32")
-	}
-	return uint32(n)
-}
-
-func u64FromInt64(n int64) uint64 {
+//nolint:ireturn // T is a generic type parameter resolved at each call site, not a real interface return
+func toWireUint[T unsignedWire](n int64) T {
 	if n < 0 {
-		panic("message: negative size")
+		panic(fmt.Sprintf("message: negative value %d cannot be encoded as unsigned", n))
 	}
-	return uint64(n)
+	var maxV T
+	maxV--
+	if uint64(n) > uint64(maxV) {
+		panic(fmt.Sprintf("message: value %d overflows %T", n, maxV))
+	}
+	return T(n)
 }
 
-func int64FromU64(n uint64) int64 {
+func toInt64(n uint64) int64 {
 	if n > math.MaxInt64 {
-		panic("message: size exceeds int64")
+		panic(fmt.Sprintf("message: value %d overflows int64", n))
 	}
 	return int64(n)
 }
@@ -103,38 +105,44 @@ type Message struct {
 	To          string       `json:"to"`
 	Content     string       `json:"content"`
 	Time        time.Time    `json:"time"`
+	CreatedAt   time.Time    `json:"created_at"`
+	UpdatedAt   time.Time    `json:"updated_at"`
 	Attachments []Attachment `json:"attachments"`
 }
 
 func NewMessage(to, content string, attachments ...Attachment) *Message {
-	return &Message{ID: uuid.New(), To: to, Content: content, Time: time.Now().UTC(), Attachments: attachments}
+	now := time.Now().UTC()
+	return &Message{
+		ID: uuid.New(), To: to, Content: content, Time: now,
+		CreatedAt: now, UpdatedAt: now, Attachments: attachments,
+	}
 }
 
 func attachmentEncodedSize(a Attachment) int {
-	return 16 + 2 + len(a.Name) + 2 + len(a.MIMEType) + 8 + 4 + len(a.Data)
+	return idSize + u16Size + len(a.Name) + u16Size + len(a.MIMEType) + u64Size + u32Size + len(a.Data)
 }
 
 func encodeAttachment(buf []byte, off int, a Attachment) int {
 	copy(buf[off:], a.ID[:])
-	off += 16
+	off += idSize
 
 	nameBytes := []byte(a.Name)
-	binary.BigEndian.PutUint16(buf[off:], u16Len(len(nameBytes)))
-	off += 2
+	binary.BigEndian.PutUint16(buf[off:], toWireUint[uint16](int64(len(nameBytes))))
+	off += u16Size
 	copy(buf[off:], nameBytes)
 	off += len(nameBytes)
 
 	mimeBytes := []byte(a.MIMEType)
-	binary.BigEndian.PutUint16(buf[off:], u16Len(len(mimeBytes)))
-	off += 2
+	binary.BigEndian.PutUint16(buf[off:], toWireUint[uint16](int64(len(mimeBytes))))
+	off += u16Size
 	copy(buf[off:], mimeBytes)
 	off += len(mimeBytes)
 
-	binary.BigEndian.PutUint64(buf[off:], u64FromInt64(a.Size))
-	off += 8
+	binary.BigEndian.PutUint64(buf[off:], toWireUint[uint64](a.Size))
+	off += u64Size
 
-	binary.BigEndian.PutUint32(buf[off:], u32Len(len(a.Data)))
-	off += 4
+	binary.BigEndian.PutUint32(buf[off:], toWireUint[uint32](int64(len(a.Data))))
+	off += u32Size
 	copy(buf[off:], a.Data)
 	off += len(a.Data)
 
@@ -143,33 +151,33 @@ func encodeAttachment(buf []byte, off int, a Attachment) int {
 
 func decodeAttachment(data []byte, off int) (Attachment, int, error) {
 	var a Attachment
-	if len(data) < off+16+2 {
+	if len(data) < off+idSize+u16Size {
 		return a, 0, errors.New("message: buffer truncated at attachment id")
 	}
-	copy(a.ID[:], data[off:off+16])
-	off += 16
+	copy(a.ID[:], data[off:off+idSize])
+	off += idSize
 
 	nameLen := int(binary.BigEndian.Uint16(data[off:]))
-	off += 2
-	if len(data) < off+nameLen+2 {
+	off += u16Size
+	if len(data) < off+nameLen+u16Size {
 		return a, 0, errors.New("message: buffer truncated at attachment name")
 	}
 	a.Name = string(data[off : off+nameLen])
 	off += nameLen
 
 	mimeLen := int(binary.BigEndian.Uint16(data[off:]))
-	off += 2
-	if len(data) < off+mimeLen+8+4 {
+	off += u16Size
+	if len(data) < off+mimeLen+u64Size+u32Size {
 		return a, 0, errors.New("message: buffer truncated at attachment mime")
 	}
 	a.MIMEType = string(data[off : off+mimeLen])
 	off += mimeLen
 
-	a.Size = int64FromU64(binary.BigEndian.Uint64(data[off:]))
-	off += 8
+	a.Size = toInt64(binary.BigEndian.Uint64(data[off:]))
+	off += u64Size
 
 	dataLen := int(binary.BigEndian.Uint32(data[off:]))
-	off += 4
+	off += u32Size
 	if len(data) < off+dataLen {
 		return a, 0, errors.New("message: buffer truncated at attachment data")
 	}
@@ -186,8 +194,14 @@ func (m *Message) Encode() ([]byte, error) {
 	toBytes := []byte(m.To)
 	contentBytes := []byte(m.Content)
 
-	//nolint: mnd // size calculation for message encoding
-	size := 16 + config.AesKeySize + 2 + len(toBytes) + 4 + len(contentBytes) + timeFieldSize + 2
+	size := idSize + // m.ID
+		config.AesKeySize + // m.FromPubKey
+		u16Size + len(toBytes) + // m.To
+		u32Size + len(contentBytes) + // m.Content
+		timeFieldSize + // m.Time
+		timeFieldSize + // m.CreatedAt
+		timeFieldSize + // m.UpdatedAt
+		u16Size // attachment count
 	for _, a := range m.Attachments {
 		size += attachmentEncodedSize(a)
 	}
@@ -195,25 +209,31 @@ func (m *Message) Encode() ([]byte, error) {
 	buf := make([]byte, size)
 	off := 0
 	copy(buf[off:], m.ID[:])
-	off += 16
+	off += idSize
 	copy(buf[off:], m.FromPubKey[:])
 	off += config.AesKeySize
 
-	binary.BigEndian.PutUint16(buf[off:], u16Len(len(toBytes)))
-	off += 2
+	binary.BigEndian.PutUint16(buf[off:], toWireUint[uint16](int64(len(toBytes))))
+	off += u16Size
 	copy(buf[off:], toBytes)
 	off += len(toBytes)
 
-	binary.BigEndian.PutUint32(buf[off:], u32Len(len(contentBytes)))
-	off += 4
+	binary.BigEndian.PutUint32(buf[off:], toWireUint[uint32](int64(len(contentBytes))))
+	off += u32Size
 	copy(buf[off:], contentBytes)
 	off += len(contentBytes)
 
-	binary.BigEndian.PutUint64(buf[off:], u64FromInt64(m.Time.UnixNano()))
-	off += 8
+	binary.BigEndian.PutUint64(buf[off:], toWireUint[uint64](m.Time.UnixNano()))
+	off += timeFieldSize
 
-	binary.BigEndian.PutUint16(buf[off:], u16Len(len(m.Attachments)))
-	off += 2
+	binary.BigEndian.PutUint64(buf[off:], toWireUint[uint64](m.CreatedAt.UnixNano()))
+	off += timeFieldSize
+
+	binary.BigEndian.PutUint64(buf[off:], toWireUint[uint64](m.UpdatedAt.UnixNano()))
+	off += timeFieldSize
+
+	binary.BigEndian.PutUint16(buf[off:], toWireUint[uint16](int64(len(m.Attachments))))
+	off += u16Size
 	for _, a := range m.Attachments {
 		off = encodeAttachment(buf, off, a)
 	}
@@ -225,36 +245,44 @@ func ToMessage(data []byte) (*Message, error) {
 	m := &Message{}
 	off := 0
 
-	if len(data) < 16+config.AesKeySize+2 {
+	if len(data) < idSize+config.AesKeySize+u16Size {
 		return nil, errors.New("message: buffer too short for header")
 	}
-	copy(m.ID[:], data[off:off+16])
-	off += 16
+	copy(m.ID[:], data[off:off+idSize])
+	off += idSize
 	copy(m.FromPubKey[:], data[off:off+config.AesKeySize])
 	off += config.AesKeySize
 
 	dLen := int(binary.BigEndian.Uint16(data[off:]))
-	off += 2
-	if len(data) < off+dLen+4 {
+	off += u16Size
+	if len(data) < off+dLen+u32Size {
 		return nil, errors.New("message: buffer truncated at to")
 	}
 	m.To = string(data[off : off+dLen])
 	off += dLen
 
 	contentLen := int(binary.BigEndian.Uint32(data[off:]))
-	off += 4
-	if len(data) < off+contentLen+8+2 {
+	off += u32Size
+	if len(data) < off+contentLen+3*timeFieldSize+u16Size {
 		return nil, errors.New("message: buffer truncated at content")
 	}
 	m.Content = string(data[off : off+contentLen])
 	off += contentLen
 
-	nanos := int64FromU64(binary.BigEndian.Uint64(data[off:]))
-	off += 8
+	nanos := toInt64(binary.BigEndian.Uint64(data[off:]))
+	off += timeFieldSize
 	m.Time = time.Unix(0, nanos).UTC()
 
+	createdNanos := toInt64(binary.BigEndian.Uint64(data[off:]))
+	off += timeFieldSize
+	m.CreatedAt = time.Unix(0, createdNanos).UTC()
+
+	updatedNanos := toInt64(binary.BigEndian.Uint64(data[off:]))
+	off += timeFieldSize
+	m.UpdatedAt = time.Unix(0, updatedNanos).UTC()
+
 	attCount := int(binary.BigEndian.Uint16(data[off:]))
-	off += 2
+	off += u16Size
 
 	m.Attachments = make([]Attachment, 0, attCount)
 	for range attCount {
@@ -329,6 +357,11 @@ func Get(s *store.Store, secret keys.Key, id uuid.UUID) (*Message, error) {
 }
 
 func Update(s *store.Store, secret keys.Key, id uuid.UUID, fromName string, msg *Message) error {
+	if existing, err := Get(s, secret, id); err == nil {
+		msg.CreatedAt = existing.CreatedAt
+	}
+	msg.UpdatedAt = time.Now().UTC()
+
 	plain, err := msg.Encode()
 	if err != nil {
 		return fmt.Errorf("message: encode: %w", err)

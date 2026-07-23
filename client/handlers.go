@@ -50,7 +50,7 @@ func (c *Client) handleWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err = c.Store.KnownPeers.Get(pubKey)
+	knownPeer, err := c.Store.KnownPeers.Get(pubKey)
 	if err != nil && !os.IsNotExist(err) {
 		c.log.ErrorContext(r.Context(), "lookup peer", "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -68,7 +68,7 @@ func (c *Client) handleWS(w http.ResponseWriter, r *http.Request) {
 		}
 		c.log.DebugContext(r.Context(), "new peer saved as pending", "pub_key", pubKey, "ip", peerIP)
 	} else {
-		status = store.NilStatus
+		status = knownPeer.Status
 	}
 
 	if status == store.Rejected {

@@ -206,9 +206,9 @@ func (c *Client) adminListSessions(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (c *Client) adminDeleteSession(w http.ResponseWriter, r *http.Request) {
-	pubKey := r.PathValue("pubKey")
-	if pubKey == "" {
-		http.Error(w, "missing pubKey\n", http.StatusBadRequest)
+	pubKey, err := keys.FromHex(r.PathValue("pubKey"))
+	if err != nil {
+		http.Error(w, "invalid pubKey\n", http.StatusBadRequest)
 		return
 	}
 	v, loaded := c.sessions.LoadAndDelete(pubKey)
