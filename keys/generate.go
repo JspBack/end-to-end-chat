@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
+	"database/sql/driver"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -12,6 +13,9 @@ import (
 	"strings"
 )
 
+const minQuotedHexLen = 2
+
+//nolint:recvcheck // no mutation.
 type (
 	Key        [32]byte
 	PubKey     = Key
@@ -123,4 +127,54 @@ func Verify(pubKey PubKey, msg, sig []byte) bool {
 func (k *Keys) Derive() string {
 	h := sha256.Sum256(k.Private[:])
 	return hex.EncodeToString(h[:8])
+}
+
+// sql driver & logger needs these.
+func (p Key) MarshalJSON() ([]byte, error) {
+	return []byte(`"` + p.String() + `"`), nil
+}
+
+func (p *Key) UnmarshalJSON(b []byte) error {
+	s, err := parseHexQuoted(b)
+	if err != nil {
+		return err
+	}
+	k, err := FromHex(s)
+	if err != nil {
+		return err
+	}
+	*p = k
+	return nil
+}
+
+func parseHexQuoted(b []byte) (string, error) {
+	if len(b) < minQuotedHexLen {
+		return "", errors.New("keys: too short for quoted hex")
+	}
+	if b[0] != '"' || b[len(b)-1] != '"' {
+		return "", errors.New("keys: not a quoted string")
+	}
+	return string(b[1 : len(b)-1]), nil
+}
+
+func (p Key) Value() (driver.Value, error) {
+	return p.String(), nil
+}
+
+func (p *Key) Scan(src any) error {
+	var s string
+	switch v := src.(type) {
+	case string:
+		s = v
+	case []byte:
+		s = string(v)
+	default:
+		return fmt.Errorf("keys: cannot scan type %T", src)
+	}
+	k, err := FromHex(s)
+	if err != nil {
+		return err
+	}
+	*p = k
+	return nil
 }

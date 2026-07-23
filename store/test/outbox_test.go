@@ -15,8 +15,8 @@ var outboxSecret = func() keys.Key {
 	return k
 }()
 
-func TestOutboxPut(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "test_outbox_put")
+func TestOutboxPutAndGet(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "test_outbox_putget")
 	s := store.New(dir)
 
 	var targetKey keys.Key
@@ -30,9 +30,20 @@ func TestOutboxPut(t *testing.T) {
 	if id == uuid.Nil {
 		t.Fatal("expected non-empty id")
 	}
+
+	entries, err := s.Outbox.Get(targetKey, outboxSecret)
+	if err != nil {
+		t.Fatal("Get:", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+	if string(entries[0].SignalContent) != string(rawSignal) {
+		t.Errorf("signal content mismatch:\ngot:  %q\nwant: %q", entries[0].SignalContent, rawSignal)
+	}
 }
 
-func TestOutboxGetWrongPeerEmpty(t *testing.T) {
+func TestOutboxGetWrongPeer(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "test_outbox_wrongpeer")
 	s := store.New(dir)
 
@@ -55,35 +66,23 @@ func TestOutboxGetWrongPeerEmpty(t *testing.T) {
 	}
 }
 
-func TestOutboxMultiplePuts(t *testing.T) {
+func TestOutboxMultiplePutsSamePeer(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "test_outbox_multi")
 	s := store.New(dir)
 
 	var peerKey keys.Key
 	copy(peerKey[:], []byte("peer-key-for-multi-put-test!!"))
 
-	id1, err := s.Outbox.Put(peerKey, []byte(`{"type":"message","content":"first"}`), outboxSecret)
-	if err != nil {
-		t.Fatal("Put 1:", err)
-	}
-	if id1 == uuid.Nil {
-		t.Fatal("expected non-empty id for first put")
-	}
+	_, _ = s.Outbox.Put(peerKey, []byte(`{"type":"message","content":"first"}`), outboxSecret)
+	_, _ = s.Outbox.Put(peerKey, []byte(`{"type":"message","content":"second"}`), outboxSecret)
+	_, _ = s.Outbox.Put(peerKey, []byte(`{"type":"delete","id":"msg-1"}`), outboxSecret)
 
-	id2, err := s.Outbox.Put(peerKey, []byte(`{"type":"message","content":"second"}`), outboxSecret)
+	entries, err := s.Outbox.Get(peerKey, outboxSecret)
 	if err != nil {
-		t.Fatal("Put 2:", err)
+		t.Fatal("Get:", err)
 	}
-	if id2 == uuid.Nil {
-		t.Fatal("expected non-empty id for second put")
-	}
-
-	id3, err := s.Outbox.Put(peerKey, []byte(`{"type":"delete","id":"msg-1"}`), outboxSecret)
-	if err != nil {
-		t.Fatal("Put 3:", err)
-	}
-	if id3 == uuid.Nil {
-		t.Fatal("expected non-empty id for third put")
+	if len(entries) != 3 {
+		t.Fatalf("expected 3 entries, got %d", len(entries))
 	}
 }
 
@@ -98,6 +97,11 @@ func TestOutboxDelete(t *testing.T) {
 	err := s.Outbox.Delete(id)
 	if err != nil {
 		t.Fatal("Delete:", err)
+	}
+
+	entries, _ := s.Outbox.Get(peerKey, outboxSecret)
+	if len(entries) != 0 {
+		t.Errorf("expected 0 entries after delete, got %d", len(entries))
 	}
 }
 
@@ -118,19 +122,57 @@ func TestOutboxIncrementRetry(t *testing.T) {
 	var peerKey keys.Key
 	copy(peerKey[:], []byte("peer-key-for-retry-test!!!!!"))
 
-	id, err := s.Outbox.Put(peerKey, []byte(`{"type":"message"}`), outboxSecret)
-	if err != nil {
-		t.Fatal("Put:", err)
-	}
+	id, _ := s.Outbox.Put(peerKey, []byte(`{"type":"message"}`), outboxSecret)
 
-	err = s.Outbox.IncrementRetry(id)
+	err := s.Outbox.IncrementRetry(id)
 	if err != nil {
 		t.Fatal("IncrementRetry:", err)
 	}
 
-	err = s.Outbox.IncrementRetry(id)
+	entries, _ := s.Outbox.Get(peerKey, outboxSecret)
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+	if entries[0].RetryCount != 1 {
+		t.Errorf("expected RetryCount=1, got %d", entries[0].RetryCount)
+	}
+
+	_ = s.Outbox.IncrementRetry(id)
+	entries, _ = s.Outbox.Get(peerKey, outboxSecret)
+	if entries[0].RetryCount != 2 {
+		t.Errorf("expected RetryCount=2, got %d", entries[0].RetryCount)
+	}
+}
+
+func TestOutboxList(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "test_outbox_all")
+	s := store.New(dir)
+
+	var keyA, keyB keys.Key
+	copy(keyA[:], []byte("peer-a-key-for-outbox-list!!!!"))
+	copy(keyB[:], []byte("peer-b-key-for-outbox-list!!!!"))
+
+	_, _ = s.Outbox.Put(keyA, []byte(`{"type":"message","content":"a1"}`), outboxSecret)
+	_, _ = s.Outbox.Put(keyB, []byte(`{"type":"message","content":"b1"}`), outboxSecret)
+	_, _ = s.Outbox.Put(keyA, []byte(`{"type":"message","content":"a2"}`), outboxSecret)
+
+	entries, err := s.Outbox.List()
 	if err != nil {
-		t.Fatal("IncrementRetry 2:", err)
+		t.Fatal("List:", err)
+	}
+	if len(entries) != 3 {
+		t.Fatalf("expected 3 entries, got %d", len(entries))
+	}
+
+	peers := map[string]int{}
+	for _, e := range entries {
+		peers[e.TargetPubKey.String()]++
+	}
+	if peers[keyA.String()] != 2 {
+		t.Errorf("expected 2 entries for peer-a, got %d", peers[keyA.String()])
+	}
+	if peers[keyB.String()] != 1 {
+		t.Errorf("expected 1 entry for peer-b, got %d", peers[keyB.String()])
 	}
 }
 
@@ -147,17 +189,53 @@ func TestOutboxListEmpty(t *testing.T) {
 	}
 }
 
-func TestOutboxPutDuplicateID(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "test_outbox_dup")
+func TestOutboxEncryption(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "test_outbox_enc")
+	s := store.New(dir)
+
+	var wrongKey keys.Key
+	copy(wrongKey[:], []byte("wrong-key-for-outbox-enc-test!"))
+
+	var peerKey keys.Key
+	copy(peerKey[:], []byte("peer-key-for-encryption-test"))
+
+	rawSignal := []byte(`{"type":"message","content":"secret message"}`)
+	_, err := s.Outbox.Put(peerKey, rawSignal, outboxSecret)
+	if err != nil {
+		t.Fatal("Put:", err)
+	}
+
+	_, err = s.Outbox.Get(peerKey, wrongKey)
+	if err == nil {
+		t.Error("expected error with wrong key")
+	}
+
+	entries, err := s.Outbox.Get(peerKey, outboxSecret)
+	if err != nil {
+		t.Fatal("Get with correct key:", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+	if string(entries[0].SignalContent) != string(rawSignal) {
+		t.Errorf("got %q, want %q", entries[0].SignalContent, rawSignal)
+	}
+}
+
+func TestOutboxOrderPreserved(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "test_outbox_order")
 	s := store.New(dir)
 
 	var peerKey keys.Key
-	copy(peerKey[:], []byte("peer-key-for-dup-test!!!!!!"))
+	copy(peerKey[:], []byte("peer-key-for-order-test!!!!!"))
 
-	id1, _ := s.Outbox.Put(peerKey, []byte(`{"type":"msg","content":"first"}`), outboxSecret)
-	id2, _ := s.Outbox.Put(peerKey, []byte(`{"type":"msg","content":"second"}`), outboxSecret)
+	msgs := []string{"first", "second", "third"}
+	for _, m := range msgs {
+		_, _ = s.Outbox.Put(peerKey, []byte(`{"content":"`+m+`"}`), outboxSecret)
+	}
 
-	if id1 == id2 {
-		t.Error("two Puts should produce different IDs")
+	entries, _ := s.Outbox.Get(peerKey, outboxSecret)
+	if len(entries) != 3 {
+		t.Fatalf("expected 3 entries, got %d", len(entries))
 	}
 }

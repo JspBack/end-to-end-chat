@@ -10,8 +10,8 @@ import (
 	"github.com/JspBack/end-to-end-chat/store"
 )
 
-func TestKnownPeersAdd(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "test_peers_add")
+func TestKnownPeersAddGet(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "test_peers_addget")
 	s := store.New(dir)
 
 	var pk keys.Key
@@ -21,6 +21,14 @@ func TestKnownPeersAdd(t *testing.T) {
 	err := s.KnownPeers.Add(peer)
 	if err != nil {
 		t.Fatal("Add:", err)
+	}
+
+	got, err := s.KnownPeers.Get(pk)
+	if err != nil {
+		t.Fatal("Get:", err)
+	}
+	if got.PubKey != pk || !got.PeerIP.Equal(net.ParseIP("10.0.0.1")) || got.Status != store.Pending {
+		t.Errorf("got %+v, want PubKey=%s PeerIP=10.0.0.1 Status=pending", got, pk.String())
 	}
 }
 
@@ -37,21 +45,42 @@ func TestKnownPeersGetNotFound(t *testing.T) {
 	}
 }
 
-func TestKnownPeersAddThenReplace(t *testing.T) {
+func TestKnownPeersReplace(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "test_peers_replace")
 	s := store.New(dir)
 
 	var pk keys.Key
 	copy(pk[:], []byte("abcdefghijklmnopqrstuvwxyz123456"))
 
-	err := s.KnownPeers.Add(&store.KnownPeer{PubKey: pk, PeerIP: net.ParseIP("10.0.0.1"), Status: store.Pending})
-	if err != nil {
-		t.Fatal("Add first:", err)
-	}
+	s.KnownPeers.Add(&store.KnownPeer{PubKey: pk, PeerIP: net.ParseIP("10.0.0.1"), Status: store.Pending})
+	s.KnownPeers.Add(&store.KnownPeer{PubKey: pk, PeerIP: net.ParseIP("10.0.0.2"), Status: store.Accepted})
 
-	err = s.KnownPeers.Add(&store.KnownPeer{PubKey: pk, PeerIP: net.ParseIP("10.0.0.2"), Status: store.Accepted})
+	got, err := s.KnownPeers.Get(pk)
 	if err != nil {
-		t.Fatal("Add second:", err)
+		t.Fatal("Get:", err)
+	}
+	if !got.PeerIP.Equal(net.ParseIP("10.0.0.2")) || got.Status != store.Accepted {
+		t.Errorf("got %+v, want IP=10.0.0.2 Status=accepted", got)
+	}
+}
+
+func TestKnownPeersList(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "test_peers_list")
+	s := store.New(dir)
+
+	var pk1, pk2 keys.Key
+	copy(pk1[:], []byte("peer_key_one_12345678901234567"))
+	copy(pk2[:], []byte("peer_key_two_12345678901234567"))
+
+	s.KnownPeers.Add(&store.KnownPeer{PubKey: pk1, PeerIP: net.ParseIP("10.0.0.1"), Status: store.Pending})
+	s.KnownPeers.Add(&store.KnownPeer{PubKey: pk2, PeerIP: net.ParseIP("10.0.0.2"), Status: store.Accepted})
+
+	list, err := s.KnownPeers.List()
+	if err != nil {
+		t.Fatal("List:", err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("expected 2 peers, got %d", len(list))
 	}
 }
 
@@ -68,20 +97,30 @@ func TestKnownPeersListEmpty(t *testing.T) {
 	}
 }
 
-func TestKnownPeersAddMultiple(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "test_peers_multi")
+func TestKnownPeersAddAndGetUpdates(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "test_peers_upd")
 	s := store.New(dir)
 
-	var pk1, pk2 keys.Key
-	copy(pk1[:], []byte("peer_key_one_12345678901234567"))
-	copy(pk2[:], []byte("peer_key_two_12345678901234567"))
+	var pk keys.Key
+	copy(pk[:], []byte("abcdefghijklmnopqrstuvwxyz123456"))
 
-	err := s.KnownPeers.Add(&store.KnownPeer{PubKey: pk1, PeerIP: net.ParseIP("10.0.0.1"), Status: store.Pending})
+	s.KnownPeers.Add(&store.KnownPeer{PubKey: pk, PeerIP: net.ParseIP("10.0.0.1"), Status: store.Pending})
+
+	got, err := s.KnownPeers.Get(pk)
 	if err != nil {
-		t.Fatal("Add pk1:", err)
+		t.Fatal("Get:", err)
 	}
-	err = s.KnownPeers.Add(&store.KnownPeer{PubKey: pk2, PeerIP: net.ParseIP("10.0.0.2"), Status: store.Accepted})
+	if got.Status != store.Pending {
+		t.Errorf("Status = %q, want %q", got.Status, store.Pending)
+	}
+
+	s.KnownPeers.Add(&store.KnownPeer{PubKey: pk, PeerIP: net.ParseIP("10.0.0.1"), Status: store.Accepted})
+
+	got, err = s.KnownPeers.Get(pk)
 	if err != nil {
-		t.Fatal("Add pk2:", err)
+		t.Fatal("Get after status update:", err)
+	}
+	if got.Status != store.Accepted {
+		t.Errorf("Status = %q, want %q", got.Status, store.Accepted)
 	}
 }
