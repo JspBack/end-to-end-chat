@@ -37,25 +37,6 @@ type statusResponse struct {
 	Status string `json:"status"`
 }
 
-func (c *Client) msgResponse(msg *message.Message) any {
-	from := ""
-	if msg.FromPubKey == c.Keys.Public {
-		from = c.getName()
-	} else if msg.FromPubKey != keys.NilKey {
-		if peer, err := c.Store.KnownPeers.Get(msg.FromPubKey); err == nil {
-			if peer.Nickname != "" {
-				from = peer.Nickname
-			} else {
-				from = peer.Name
-			}
-		}
-	}
-	return struct {
-		*message.Message
-		From string `json:"from"`
-	}{msg, from}
-}
-
 func (c *Client) adminListPeers(w http.ResponseWriter, _ *http.Request) {
 	peers, err := c.Store.KnownPeers.List()
 	if err != nil {
@@ -74,76 +55,6 @@ func (c *Client) adminListPeers(w http.ResponseWriter, _ *http.Request) {
 	_ = json.NewEncoder(w).Encode(peers)
 }
 
-func (c *Client) adminUpdatePeerStatus(w http.ResponseWriter, r *http.Request, status store.PeerStatus) {
-	pubKey, err := keys.FromHex(r.PathValue("pubKey"))
-	if err != nil {
-		http.Error(w, "invalid pubKey", http.StatusBadRequest)
-		return
-	}
-
-	peer, err := c.Store.KnownPeers.Get(pubKey)
-	if err != nil {
-		http.Error(w, "peer not found\n", http.StatusNotFound)
-		return
-	}
-
-	peer.Status = status
-	if err = c.Store.KnownPeers.Add(peer); err != nil {
-		http.Error(w, err.Error()+"\n", http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(peer)
-}
-
-func (c *Client) adminSetNickname(w http.ResponseWriter, r *http.Request) {
-	pubKey, err := keys.FromHex(r.PathValue("pubKey"))
-	if err != nil {
-		http.Error(w, "invalid pubKey", http.StatusBadRequest)
-		return
-	}
-
-	var req struct {
-		Nickname string `json:"nickname"`
-	}
-	if err = json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid body\n", http.StatusBadRequest)
-		return
-	}
-
-	peer, err := c.Store.KnownPeers.Get(pubKey)
-	if err != nil {
-		http.Error(w, "peer not found\n", http.StatusNotFound)
-		return
-	}
-
-	peer.Nickname = req.Nickname
-	if err = c.Store.KnownPeers.Add(peer); err != nil {
-		http.Error(w, err.Error()+"\n", http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(peer)
-}
-
-func (c *Client) updateSessionStatus(pubKey keys.Key, status store.PeerStatus) {
-	if status == store.Rejected {
-		if v, loaded := c.sessions.LoadAndDelete(pubKey); loaded {
-			if sess, ok := v.(*Session); ok {
-				_ = sess.closeConn()
-			}
-		}
-		return
-	}
-	if v, loaded := c.sessions.Load(pubKey); loaded {
-		if sess, ok := v.(*Session); ok {
-			sess.setStatus(status)
-		}
-	}
-}
-
 func (c *Client) adminAcceptPeer(w http.ResponseWriter, r *http.Request) {
 	pubKey, err := keys.FromHex(r.PathValue("pubKey"))
 	if err != nil {
@@ -151,7 +62,7 @@ func (c *Client) adminAcceptPeer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	c.adminUpdatePeerStatus(w, r, store.Accepted)
+	c.updatePeerStatus(w, r, store.Accepted)
 	c.updateSessionStatus(pubKey, store.Accepted)
 
 	sig, sigErr := signal.New(signal.PeerAccepted, c.Keys.Public, uuid.Nil, nil)
@@ -176,7 +87,7 @@ func (c *Client) adminRejectPeer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	c.adminUpdatePeerStatus(w, r, store.Rejected)
+	c.updatePeerStatus(w, r, store.Rejected)
 	c.updateSessionStatus(pubKey, store.Rejected)
 	c.log.InfoContext(r.Context(), "peer rejected and closed", "pub_key", pubKey)
 }
@@ -223,53 +134,29 @@ func (c *Client) adminDeleteSession(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(statusResponse{Status: statusDisconnected})
 }
 
-func parseMessageForm(r *http.Request, maxSize int64) (string, []message.Attachment, error) {
-	if err := r.ParseMultipartForm(config.MultipartMemBuf); err != nil {
-		return "", nil, errors.New("invalid form")
+func (c *Client) apiConnectPeer(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Addr string `json:"addr"`
 	}
-	content := r.FormValue("content")
-	var atts []message.Attachment
-	var totalSize int64
-	for _, fh := range r.MultipartForm.File["files"] {
-		if totalSize+fh.Size > maxSize {
-			return "", nil, fmt.Errorf("attachments exceed max size %d", maxSize)
-		}
-		totalSize += fh.Size
-		f, fe := fh.Open()
-		if fe != nil {
-			return "", nil, errors.New("read file")
-		}
-		data, fe := io.ReadAll(io.LimitReader(f, maxSize))
-		f.Close()
-		if fe != nil {
-			return "", nil, errors.New("read file")
-		}
-		atts = append(atts, message.Attachment{
-			Name:     fh.Filename,
-			MIMEType: fh.Header.Get("Content-Type"),
-			Size:     int64(len(data)),
-			Data:     data,
-		})
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid body\n", http.StatusBadRequest)
+		return
 	}
-	return content, atts, nil
-}
 
-func (c *Client) sendAttachments(ctx context.Context, pubKey keys.Key, attachments []message.Attachment, msgID uuid.UUID) {
-	v, loaded := c.sessions.Load(pubKey)
-	if !loaded {
+	addr, err := validateAddr(req.Addr)
+	if err != nil {
+		http.Error(w, err.Error()+"\n", http.StatusBadRequest)
 		return
 	}
-	sess, ok := v.(*Session)
-	if !ok || sess.status() != store.Accepted {
+
+	if err = c.connectSession(r.Context(), addr); err != nil {
+		c.log.WarnContext(r.Context(), "connect peer", "addr", addr, "error", err)
+		http.Error(w, err.Error()+"\n", http.StatusBadGateway)
 		return
 	}
-	c.log.DebugContext(ctx, "api send files", "count", len(attachments), "msg_id", msgID)
-	for _, att := range attachments {
-		fileReader := io.LimitReader(bytes.NewReader(att.Data), att.Size)
-		if sendErr := c.sendFile(sess, att.ID, att.Name, att.MIMEType, att.Size, fileReader); sendErr != nil {
-			c.log.WarnContext(ctx, "send file failed", "id", att.ID.String(), "error", sendErr)
-		}
-	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(statusResponse{Status: statusConnected})
 }
 
 func (c *Client) apiSendMessage(w http.ResponseWriter, r *http.Request) {
@@ -355,46 +242,6 @@ func (c *Client) apiSendMessage(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(statusResponse{Status: status})
 }
 
-func validateAddr(addr string) (string, error) {
-	if addr == "" || addr == ":" {
-		return "", errors.New("invalid address")
-	}
-	host, port, err := net.SplitHostPort(addr)
-	if err != nil {
-		host = addr
-		port = strconv.Itoa(config.DefaultPort)
-	}
-	if port == "" {
-		port = strconv.Itoa(config.DefaultPort)
-	}
-	return net.JoinHostPort(host, port), nil
-}
-
-func (c *Client) apiConnectPeer(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Addr string `json:"addr"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid body\n", http.StatusBadRequest)
-		return
-	}
-
-	addr, err := validateAddr(req.Addr)
-	if err != nil {
-		http.Error(w, err.Error()+"\n", http.StatusBadRequest)
-		return
-	}
-
-	if err = c.connectSession(r.Context(), addr); err != nil {
-		c.log.WarnContext(r.Context(), "connect peer", "addr", addr, "error", err)
-		http.Error(w, err.Error()+"\n", http.StatusBadGateway)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(statusResponse{Status: statusConnected})
-}
-
 func (c *Client) apiListMessages(w http.ResponseWriter, _ *http.Request) {
 	summaries, err := c.Store.Chats.List()
 	if err != nil {
@@ -448,17 +295,6 @@ func (c *Client) apiSearchMessages(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
-}
-
-func (c *Client) getOwnedMessage(id uuid.UUID) (*message.Message, error) {
-	msg, err := message.Get(c.Store, c.Keys.Private, id)
-	if err != nil {
-		return nil, fmt.Errorf("get message: %w", err)
-	}
-	if msg.FromPubKey != c.Keys.Public {
-		return nil, errNotOwner
-	}
-	return msg, nil
 }
 
 func (c *Client) apiUpdateMessage(w http.ResponseWriter, r *http.Request) {
@@ -546,6 +382,37 @@ func (c *Client) apiGetFile(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Length", strconv.Itoa(len(raw)))
 	_, _ = w.Write(raw)
+}
+
+func (c *Client) adminSetNickname(w http.ResponseWriter, r *http.Request) {
+	pubKey, err := keys.FromHex(r.PathValue("pubKey"))
+	if err != nil {
+		http.Error(w, "invalid pubKey", http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		Nickname string `json:"nickname"`
+	}
+	if err = json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid body\n", http.StatusBadRequest)
+		return
+	}
+
+	peer, err := c.Store.KnownPeers.Get(pubKey)
+	if err != nil {
+		http.Error(w, "peer not found\n", http.StatusNotFound)
+		return
+	}
+
+	peer.Nickname = req.Nickname
+	if err = c.Store.KnownPeers.Add(peer); err != nil {
+		http.Error(w, err.Error()+"\n", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(peer)
 }
 
 func (c *Client) adminListOutbox(w http.ResponseWriter, _ *http.Request) {
@@ -663,4 +530,139 @@ func (c *Client) adminGetMe(w http.ResponseWriter, _ *http.Request) {
 	}
 	mp.Close()
 	_, _ = w.Write(buf.Bytes())
+}
+
+//--------------------------------------------------------------------------------------------------
+
+func (c *Client) msgResponse(msg *message.Message) any {
+	from := ""
+	if msg.FromPubKey == c.Keys.Public {
+		from = c.getName()
+	} else if msg.FromPubKey != keys.NilKey {
+		if peer, err := c.Store.KnownPeers.Get(msg.FromPubKey); err == nil {
+			if peer.Nickname != "" {
+				from = peer.Nickname
+			} else {
+				from = peer.Name
+			}
+		}
+	}
+	return struct {
+		*message.Message
+		From string `json:"from"`
+	}{msg, from}
+}
+
+func (c *Client) updatePeerStatus(w http.ResponseWriter, r *http.Request, status store.PeerStatus) {
+	pubKey, err := keys.FromHex(r.PathValue("pubKey"))
+	if err != nil {
+		http.Error(w, "invalid pubKey", http.StatusBadRequest)
+		return
+	}
+
+	peer, err := c.Store.KnownPeers.Get(pubKey)
+	if err != nil {
+		http.Error(w, "peer not found\n", http.StatusNotFound)
+		return
+	}
+
+	peer.Status = status
+	if err = c.Store.KnownPeers.Add(peer); err != nil {
+		http.Error(w, err.Error()+"\n", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(peer)
+}
+
+func (c *Client) updateSessionStatus(pubKey keys.Key, status store.PeerStatus) {
+	if status == store.Rejected {
+		if v, loaded := c.sessions.LoadAndDelete(pubKey); loaded {
+			if sess, ok := v.(*Session); ok {
+				_ = sess.closeConn()
+			}
+		}
+		return
+	}
+	if v, loaded := c.sessions.Load(pubKey); loaded {
+		if sess, ok := v.(*Session); ok {
+			sess.setStatus(status)
+		}
+	}
+}
+
+func parseMessageForm(r *http.Request, maxSize int64) (string, []message.Attachment, error) {
+	if err := r.ParseMultipartForm(config.MultipartMemBuf); err != nil {
+		return "", nil, errors.New("invalid form")
+	}
+	content := r.FormValue("content")
+	var atts []message.Attachment
+	var totalSize int64
+	for _, fh := range r.MultipartForm.File["files"] {
+		if totalSize+fh.Size > maxSize {
+			return "", nil, fmt.Errorf("attachments exceed max size %d", maxSize)
+		}
+		totalSize += fh.Size
+		f, fe := fh.Open()
+		if fe != nil {
+			return "", nil, errors.New("read file")
+		}
+		data, fe := io.ReadAll(io.LimitReader(f, maxSize))
+		f.Close()
+		if fe != nil {
+			return "", nil, errors.New("read file")
+		}
+		atts = append(atts, message.Attachment{
+			Name:     fh.Filename,
+			MIMEType: fh.Header.Get("Content-Type"),
+			Size:     int64(len(data)),
+			Data:     data,
+		})
+	}
+	return content, atts, nil
+}
+
+func (c *Client) sendAttachments(ctx context.Context, pubKey keys.Key, attachments []message.Attachment, msgID uuid.UUID) {
+	v, loaded := c.sessions.Load(pubKey)
+	if !loaded {
+		return
+	}
+	sess, ok := v.(*Session)
+	if !ok || sess.status() != store.Accepted {
+		return
+	}
+	c.log.DebugContext(ctx, "api send files", "count", len(attachments), "msg_id", msgID)
+	for _, att := range attachments {
+		fileReader := io.LimitReader(bytes.NewReader(att.Data), att.Size)
+		if sendErr := c.sendFile(sess, att.ID, att.Name, att.MIMEType, att.Size, fileReader); sendErr != nil {
+			c.log.WarnContext(ctx, "send file failed", "id", att.ID.String(), "error", sendErr)
+		}
+	}
+}
+
+func validateAddr(addr string) (string, error) {
+	if addr == "" || addr == ":" {
+		return "", errors.New("invalid address")
+	}
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		host = addr
+		port = strconv.Itoa(config.DefaultPort)
+	}
+	if port == "" {
+		port = strconv.Itoa(config.DefaultPort)
+	}
+	return net.JoinHostPort(host, port), nil
+}
+
+func (c *Client) getOwnedMessage(id uuid.UUID) (*message.Message, error) {
+	msg, err := message.Get(c.Store, c.Keys.Private, id)
+	if err != nil {
+		return nil, fmt.Errorf("get message: %w", err)
+	}
+	if msg.FromPubKey != c.Keys.Public {
+		return nil, errNotOwner
+	}
+	return msg, nil
 }

@@ -24,14 +24,6 @@ type ChatSummary struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-func (t *ChatStore) Put(value string, secret keys.Key) (uuid.UUID, error) {
-	id := uuid.New()
-	if err := t.PutWithID(id, value, secret); err != nil {
-		return uuid.Nil, err
-	}
-	return id, nil
-}
-
 func (t *ChatStore) PutWithID(id uuid.UUID, value string, secret keys.Key) error {
 	encrypted, err := encrypt(secret, []byte(value))
 	if err != nil {

@@ -22,8 +22,6 @@ const (
 	Rejected PeerStatus = "rejected"
 )
 
-var NilStatus PeerStatus
-
 func (s PeerStatus) String() string {
 	return string(s)
 }
@@ -94,12 +92,4 @@ func (k *KnownPeerStore) List() ([]KnownPeer, error) {
 		return nil, fmt.Errorf("store: rows iteration: %w", err)
 	}
 	return peers, nil
-}
-
-func (k *KnownPeerStore) Remove(pubKey keys.Key) error {
-	q := "DELETE FROM known_peers WHERE pub_key = ?"
-	if _, err := k.db.ExecContext(context.Background(), q, pubKey.String()); err != nil {
-		return fmt.Errorf("store: remove known peer: %w", err)
-	}
-	return nil
 }
