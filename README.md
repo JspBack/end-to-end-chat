@@ -81,9 +81,14 @@ Without `-addr`, write mode listens for inbound connections and broadcasts stdin
 | `PUT` | `/admin/peers/{pubKey}/accept` | Accept peer |
 | `PUT` | `/admin/peers/{pubKey}/reject` | Reject peer |
 | `GET` | `/admin/sessions` | List active sessions |
+| `DELETE` | `/admin/sessions/{pubKey}` | Disconnect and delete a session |
 | `GET` | `/admin/outbox` | List queued outbox entries |
 | `DELETE` | `/admin/outbox/{id}` | Remove a queued outbox entry |
 | `POST` | `/admin/outbox/flush/{pubKey}` | Manually flush queued messages for a peer |
+| `PUT` | `/admin/peers/{pubKey}/nickname` | Set a peer's display name (`{"nickname":"..."}`) |
+| `PUT` | `/admin/profile` | Update own name and/or profile picture (multipart form) |
+| `DELETE` | `/admin/profile/picture` | Delete own profile picture |
+| `GET` | `/admin/me` | Get own name and profile picture (multipart) |
 
 All API endpoints are localhost-only.
 
@@ -95,6 +100,10 @@ All API endpoints are localhost-only.
 | `delete` | Delete a message by id (only owner) |
 | `update` | Update a message's content by id (only owner) |
 | `file_meta` | File transfer metadata (name, size, mime type) |
+| `key_exchange` | Key exchange for ratchet |
+| `info_request` | Request peer info (name + profile picture) |
+| `info_response` | Response with peer info |
+| `peer_accepted` | Notification that the connection was accepted |
 
 ## Flags
 
