@@ -11,8 +11,6 @@ import (
 
 var Version = "placeholder"
 
-const maxNameLen = 64
-
 const (
 	DefaultClientName       = "default"
 	DefaultPort             = 8080
@@ -31,6 +29,7 @@ const (
 	MultipartMemBuf            = 10 << 20
 	CacheDefaultExp            = 10 * time.Minute
 	CacheCleanUpInterval       = 10 * time.Minute
+	maxNameLen                 = 64
 )
 
 type Config struct {
